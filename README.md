@@ -8,11 +8,14 @@
   <a href="https://www.gnu.org/licenses/gpl-3.0">
     <img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3">
   </a>
-  <a href="https://github.com/yanniklubas/creo-loadgenerator/actions/workflows/checks.yml">
-    <img src="https://github.com/yanniklubas/creo-loadgenerator/actions/workflows/checks.yml/badge.svg" alt="checks">
+  <a href="https://github.com/DescartesResearch/CreoBench/actions/workflows/checks.yml">
+    <img src="https://github.com/DescartesResearch/CreoBench/actions/workflows/checks.yml/badge.svg" alt="checks">
   </a>
-  <a href="https://github.com/yanniklubas/creo-loadgenerator/actions/workflows/tests.yml">
-    <img src="https://github.com/yanniklubas/creo-loadgenerator/actions/workflows/tests.yml/badge.svg" alt="tests">
+  <a href="https://github.com/DescartesResearch/CreoBench/actions/workflows/tests.yml">
+    <img src="https://github.com/DescartesResearch/CreoBench/actions/workflows/tests.yml/badge.svg" alt="tests">
+  </a>
+  <a href="https://codecov.io/gh/DescartesResearch/CreoBench">
+    <img src="https://codecov.io/gh/DescartesResearch/CreoBench/branch/main/graph/badge.svg" alt="code coverage" >
   </a>
 </p>
 
