@@ -5,8 +5,8 @@
 </p>
 
 <p align="center">
-  <a href="https://www.gnu.org/licenses/gpl-3.0">
-    <img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3">
+  <a href="https://www.gnu.org/licenses/agpl-3.0">
+    <img src="https://img.shields.io/badge/License-AGPLv3-blue.svg" alt="License: AGPL v3">
   </a>
   <a href="https://github.com/DescartesResearch/CreoBench/actions/workflows/checks.yml">
     <img src="https://github.com/DescartesResearch/CreoBench/actions/workflows/checks.yml/badge.svg" alt="checks">
