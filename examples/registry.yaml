@@ -1,0 +1,3 @@
+# Logical service name -> base URL. The script's `service` field is
+# resolved against this mapping when the request is sent.
+api: https://example.com

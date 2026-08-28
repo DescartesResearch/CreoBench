@@ -1,0 +1,52 @@
+[package]
+name = "creo-bench"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+license = "GPL-3.0"
+description = "An open-loop load tester for microservice benchmarking."
+repository = "https://github.com/yanniklubas/creo-loadgenerator"
+readme = "README.md"
+
+[[bin]]
+name = "creo-orch"
+path = "src/bin/orchestrator.rs"
+
+[[bin]]
+name = "creo-load"
+path = "src/bin/load_generator.rs"
+
+[dependencies]
+clap = { version = "4.5.1", features = ["derive"] }
+reqwest = { version = "0.13.4", features = ["json"] }
+tokio = { version = "1.52.3", features = ["full", "test-util"] }
+bytes = "1.11.1"
+tokio-util = { version = "0.7.18", features = ["codec"] }
+thiserror = "2.0.18"
+rand = "0.10.1"
+cookie_store = { version = "0.22.1", default-features = false, features = [
+  "public_suffix",
+] }
+mlua = { version = "0.12.0", features = ["lua55", "vendored", "serde", "send"] }
+serde_json = "1.0.150"
+serde = { version = "1.0.228", features = ["derive"] }
+yaml_serde = "0.10.4"
+csv = "1.4.0"
+futures-util = { version = "0.3", default-features = false, features = [
+  "std",
+  "sink",
+] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["time", "env-filter"] }
+time = "0.3.49"
+url = "2.5.8"
+parking_lot = "0.12.5"
+
+[features]
+test-utils = []
+
+[dev-dependencies]
+creo-bench = { path = ".", features = ["test-utils"] }
+mockito = "1.7.2"
+proptest = "1.11.0"
+tempfile = "3.27.0"
