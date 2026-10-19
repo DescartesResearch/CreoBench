@@ -30,7 +30,7 @@ async fn run_load_test(count: u8) {
     assert_transactions_start_within_their_step(&transactions);
     assert_transactions_are_sent_after_their_start(&transactions);
     assert_every_generator_and_virtual_user_participates(&transactions, &config);
-    assert_virtual_users_alternate_requests(&transactions);
+    assert_virtual_users_alternate_requests(&intervals, &transactions);
     assert_arrival_count_matches_rate(&transactions, &config);
 
     for generator in generators {
@@ -77,16 +77,31 @@ fn assert_interval_structure(intervals: &[IntervalRow], config: &LoadTestConfig)
 
 /// Every transaction is counted in exactly one interval.
 fn assert_results_are_conserved(intervals: &[IntervalRow], transactions: &[TransactionRow]) {
-    let counted: u64 = intervals
-        .iter()
-        .map(|row| {
-            row.successful_transactions
-                + row.failed_transactions
-                + row.timeout_transactions
-                + row.dropped_transactions
-        })
-        .sum();
+    let counted: u64 = intervals.iter().map(result_count).sum();
     assert_eq!(counted, transactions.len() as u64);
+}
+
+fn result_count(row: &IntervalRow) -> u64 {
+    row.successful_transactions
+        + row.failed_transactions
+        + row.timeout_transactions
+        + row.dropped_transactions
+}
+
+/// Splits transactions into those reported before and during the load phase.
+///
+/// Both output files are written from the same stream of interval reports,
+/// so the transactions of the warmup and pause intervals come first.
+fn split_at_load_phase<'a>(
+    intervals: &[IntervalRow],
+    transactions: &'a [TransactionRow],
+) -> (&'a [TransactionRow], &'a [TransactionRow]) {
+    let before_load: u64 = intervals
+        .iter()
+        .filter(|row| row.phase != "load")
+        .map(result_count)
+        .sum();
+    transactions.split_at(before_load as usize)
 }
 
 fn assert_transactions_succeed(transactions: &[TransactionRow]) {
@@ -138,13 +153,30 @@ fn assert_every_generator_and_virtual_user_participates(
 
 /// Each virtual user executes its behavior loop in order, so its requests
 /// alternate between both specs.
-fn assert_virtual_users_alternate_requests(transactions: &[TransactionRow]) {
-    let mut last_spec = std::collections::HashMap::new();
-    for row in transactions {
-        let spec = row.spec_id.unwrap();
-        if let Some(previous) = last_spec.insert((row.load_generator_id, row.virtual_user_id), spec)
-        {
-            assert_ne!(previous, spec, "{row:?}");
+///
+/// Rows are not written in execution order, since a virtual user can start its
+/// next request before the previous result is logged. A virtual user sends one
+/// request at a time, so ordering its rows by send time restores the execution
+/// order. Send times are relative to the start of their phase, so each phase is
+/// checked separately.
+fn assert_virtual_users_alternate_requests(
+    intervals: &[IntervalRow],
+    transactions: &[TransactionRow],
+) {
+    let (before_load, load) = split_at_load_phase(intervals, transactions);
+    for phase in [before_load, load] {
+        let mut by_user = std::collections::BTreeMap::<_, Vec<_>>::new();
+        for row in phase {
+            by_user
+                .entry((row.load_generator_id, row.virtual_user_id))
+                .or_default()
+                .push(row);
+        }
+        for rows in by_user.values_mut() {
+            rows.sort_by(|a, b| a.send_time.unwrap().total_cmp(&b.send_time.unwrap()));
+            for pair in rows.windows(2) {
+                assert_ne!(pair[0].spec_id, pair[1].spec_id, "{pair:?}");
+            }
         }
     }
 }
