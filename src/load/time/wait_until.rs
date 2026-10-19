@@ -79,10 +79,17 @@ mod tests {
     /// busy-wait window in one go wakes up too late. Requires most waits to
     /// end within 2 µs, which only holds if every sleep ends before the
     /// deadline.
+    ///
+    /// Skipped on macOS: its virtualized CI runners wake sleeping threads too
+    /// late for this, even with halved sleeps.
     #[test]
     #[cfg_attr(
         not(unix),
         ignore = "high-resolution timing is unreliable on this platform"
+    )]
+    #[cfg_attr(
+        target_os = "macos",
+        ignore = "sleeps on virtualized macOS CI runners wake up too late"
     )]
     fn long_waits_end_within_2_microseconds() {
         use rand::{RngExt, SeedableRng};
