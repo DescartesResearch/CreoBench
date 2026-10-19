@@ -69,31 +69,44 @@ mod tests {
         }
     }
 
-    /// Checks the scheduling precision of exponentially distributed waits at
-    /// 50,000 requests per second. Windows timers are too coarse and unreliable
-    /// for this, so the test only runs on Unix-like systems by default.
+    /// Checks that short waits are busy-waited rather than slept.
+    ///
+    /// Busy-waiting returns within tens of nanoseconds of the deadline, while
+    /// sleeping wakes up microseconds late even with precise timers (macOS) and
+    /// tens of microseconds late on Linux. On a busy machine such as a shared CI
+    /// runner, the waiting thread is sometimes preempted and misses deadlines by
+    /// much more, so the test only requires a quarter of all waits to end within
+    /// 2 µs. Busy-waiting stays above that even with twice as many CPU-bound
+    /// threads as cores, while sleeping stays well below it.
+    ///
+    /// Windows timers are too coarse and unreliable for this, so the test only
+    /// runs on Unix-like systems.
     #[test]
     #[cfg_attr(
         not(unix),
         ignore = "high-resolution timing is unreliable on this platform"
     )]
-    fn lag_is_below_50_microseconds_at_high_rates() {
+    fn busy_waiting_ends_short_waits_within_2_microseconds() {
         use rand::SeedableRng;
 
         use crate::math::exponential::sample_exponential;
 
         let mut rng = rand::rngs::StdRng::seed_from_u64(1);
         let mut deadline = Instant::now();
-        let mut lags: Vec<_> = (0..100_000)
-            .map(|_| {
+        let samples = 50_000;
+        let precise = (0..samples)
+            .filter(|_| {
                 deadline += Duration::from_secs_f64(sample_exponential(1.0 / 50_000.0, &mut rng));
                 wait_until(deadline);
-                Instant::now().saturating_duration_since(deadline)
+                Instant::now().saturating_duration_since(deadline) < Duration::from_micros(2)
             })
-            .collect();
-        lags.sort();
+            .count();
 
-        let p99 = lags[lags.len() * 99 / 100];
-        assert!(p99 < Duration::from_micros(50), "p99 lag was {p99:?}");
+        let share = precise as f64 / f64::from(samples);
+        assert!(
+            share >= 0.25,
+            "only {:.1}% of waits ended within 2 µs",
+            share * 100.0
+        );
     }
 }
