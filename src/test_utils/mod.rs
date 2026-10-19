@@ -14,6 +14,8 @@ mod script;
 mod warmup;
 
 #[cfg(test)]
+mod logs;
+#[cfg(test)]
 mod mock_client;
 #[cfg(test)]
 mod pool;
@@ -29,6 +31,8 @@ pub mod prelude {
     };
     pub use crate::test_utils::warmup::WarmupBuilder;
 
+    #[cfg(test)]
+    pub use crate::test_utils::logs::LogCapture;
     #[cfg(test)]
     pub use crate::test_utils::mock_client::{MockClientBuilder, MockHttpClient, MockResponse};
     #[cfg(test)]

@@ -11,7 +11,7 @@ use crate::http::HttpClient;
 use crate::load::{LoadStepStart, LoadTestTime, RelativeLoadTestTime, ScheduledStep};
 use crate::math::rng::RangeRNG;
 use crate::net::MessageFramer;
-use crate::tracker::{IntervalReport, IntervalStatistics, Tracker};
+use crate::tracker::{IntervalReport, Tracker};
 use crate::transaction::LoadGeneratorId;
 use crate::wire::command::Command;
 use crate::wire::report::GeneratorUpdate;
@@ -112,15 +112,24 @@ where
             let target_time = pause_zero + deadline;
             tokio::time::sleep(target_time - LoadStepStart::now()).await;
 
+            // Warmup transactions that complete during the pause belong to the pause.
             let report = IntervalReport::new(
                 target_time.duration_since(pause_zero),
                 0,
-                IntervalStatistics::default(),
+                self.tracker.interval_statistics(),
                 None,
             );
             self.framed
                 .send(GeneratorUpdate::IntervalReport(report))
                 .await?;
+        }
+
+        let in_flight = self.tracker.inflight_count();
+        if in_flight > 0 {
+            tracing::warn!(
+                "Warmup pause is too short: {in_flight} warmup transactions are still in flight \
+                 and will be reported in the load phase. Consider a longer pause."
+            );
         }
 
         Ok(())
@@ -354,6 +363,68 @@ mod tests {
         );
         assert_eq!(pr1.load_level, 0);
         assert!(pr1.final_batch_time.is_none());
+    }
+
+    /// Runs the warmup and returns its warmup and pause reports.
+    async fn run_warmup(warmup: Warmup, response_delay_ms: u64) -> Vec<IntervalReport> {
+        let (client, server) = tokio::io::duplex(1 << 16);
+        let profile = LoadProfile { steps: vec![] };
+        let mut handle = handle_with(profile, warmup, 64, client, Some(response_delay_ms)).await;
+        let report_count = warmup.duration + warmup.pause;
+        let reader = tokio::spawn(async move {
+            let mut orchestrator = orchestrator(server);
+            let mut reports = Vec::new();
+            for _ in 0..report_count {
+                reports.push(recv_interval_report(&mut orchestrator).await);
+            }
+            reports
+        });
+
+        handle.warmup().await.unwrap();
+
+        reader.await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn warmup_reports_transactions_completing_during_pause_as_pause() {
+        let logs = LogCapture::start();
+        let warmup = Warmup {
+            rate: 50,
+            duration: 1,
+            pause: 2,
+        };
+
+        // Transactions take 500 ms, so those dispatched late in the warmup
+        // complete during the pause.
+        let reports = run_warmup(warmup, 500).await;
+
+        let (warmup_reports, pause_reports) = reports.split_at(1);
+        let warmup_results = warmup_reports[0].stats.results().len();
+        let pause_results: usize = pause_reports.iter().map(|r| r.stats.results().len()).sum();
+        assert!(warmup_results > 0);
+        assert!(pause_results > 0);
+        for report in pause_reports {
+            assert_eq!(report.load_level, 0);
+        }
+        let logs = logs.contents();
+        assert!(!logs.contains("pause is too short"), "{logs}");
+    }
+
+    #[tokio::test]
+    async fn warmup_warns_when_transactions_outlast_pause() {
+        let logs = LogCapture::start();
+        let warmup = Warmup {
+            rate: 50,
+            duration: 1,
+            pause: 1,
+        };
+
+        // Transactions take 1.5 s, so those dispatched after 0.5 s are still in
+        // flight when the pause ends.
+        run_warmup(warmup, 1500).await;
+
+        let logs = logs.contents();
+        assert!(logs.contains("Warmup pause is too short"), "{logs}");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
