@@ -161,8 +161,11 @@ users are busy, the transaction waits for the next free one. The virtual
 user runs the next step in its script, sends the corresponding HTTP request,
 and passes the response back to the script. CreoBench records the outcome of
 every transaction, including transactions that fail, time out, or are
-dropped because they waited longer than the timeout for a free virtual
-user.
+dropped. A transaction is dropped if its request cannot be sent within 10 ms
+of its scheduled arrival, because no virtual user became free in time or the
+load generator got to it too late. Requests are never sent late, so the
+system under test always sees the scheduled arrivals, and drops reveal that
+the load generators could not deliver the scheduled load.
 
 ---
 
@@ -204,10 +207,10 @@ when the HTTP request is sent and ends when a response is received or the
 request reaches a terminal outcome, such as a failure or timeout. A dropped
 transaction has no service time because its HTTP request was never sent.
 
-The difference between response time and service time shows how much time
-was spent before the request reached the service. A large difference can
-indicate that the load generator does not have enough available virtual
-users or resources to schedule transactions on time.
+The difference between response time and service time is the time spent in
+the load generator: before the request was sent, which is at most 10 ms since
+later requests are dropped, and in the script's extract function after the
+response arrived.
 
 See [Outputs](outputs.md) for a detailed description of the available
 results.

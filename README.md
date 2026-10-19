@@ -278,10 +278,11 @@ The metrics in `interval.csv` group transactions by the interval in which they f
 were sent. Consequently, a transaction sent during one interval may be included in the metrics for a later interval if
 it completes after the original interval has ended.
 
-A dropped transaction is one that was scheduled or started by the load generator but never sent to the system under
-test. Drops occur when the transaction waits longer than the configured timeout for a free virtual user, or when
-workload execution fails before the request is sent. A high number of dropped transactions may indicate insufficient VU
-pool size or load-generator capacity rather than a failure in the system under test.
+A dropped transaction is one that was scheduled by the load generator but never sent to the system under test, because
+it could not be sent within 10 ms of its scheduled arrival: no virtual user became free in time (`NoVirtualUser`), or
+the load generator itself got to it too late (`Late`). Transactions are also dropped when the script fails before the
+request is sent (`Error`). Drops mean that the load generators did not deliver the scheduled load, so any drop in the
+load phase invalidates the run. At the end of a run, CreoBench summarizes all drops by reason and how to fix them.
 
 ### `transactions.csv`
 
@@ -289,18 +290,18 @@ pool size or load-generator capacity rather than a failure in the system under t
 network. This can be used for detailed post-hoc analysis. Times are relative to the start of the transaction's phase
 (warmup or load). Rows are not ordered by execution; sort by `start_time` or `send_time` where order matters.
 
-| Column              | Description                                                                                              |
-| ------------------- | -------------------------------------------------------------------------------------------------------- |
-| `target_time`       | Deadline of the load interval this transaction was scheduled in                                          |
-| `start_time`        | Scheduled arrival time of the transaction                                                                |
-| `send_time`         | Time at which the request was sent; empty for dropped transactions                                       |
-| `load_generator_id` | Identifier of the load generator that sent the transaction                                               |
-| `virtual_user_id`   | Identifier of the virtual user that sent the transaction                                                 |
-| `spec_id`           | Index of the request specification in the script's request table that was sent for this transaction      |
-| `response_time_ms`  | Time in milliseconds from the scheduled arrival until the outcome, including any wait for a virtual user |
-| `service_time_ms`   | Time in milliseconds from sending the request until its response                                         |
-| `outcome`           | Transaction outcome: `success`, `failed`, `timeout`, or `dropped`                                        |
-| `reason`            | Error classification for non-success outcomes; `null` for successful transactions                        |
+| Column              | Description                                                                                                  |
+| ------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `target_time`       | Deadline of the load interval this transaction was scheduled in                                              |
+| `start_time`        | Scheduled arrival time of the transaction                                                                    |
+| `send_time`         | Time at which the request was sent; empty for dropped transactions                                           |
+| `load_generator_id` | Identifier of the load generator that sent the transaction                                                   |
+| `virtual_user_id`   | Identifier of the virtual user that sent the transaction; empty if it was dropped before getting one         |
+| `spec_id`           | Index of the request specification in the script's request table that was sent for this transaction          |
+| `response_time_ms`  | Time in milliseconds from the scheduled arrival until the outcome, including any wait for a virtual user     |
+| `service_time_ms`   | Time in milliseconds from sending the request until its response                                             |
+| `outcome`           | Transaction outcome: `success`, `failed`, `timeout`, or `dropped`                                            |
+| `reason`            | Error classification for non-success outcomes, e.g. `NoVirtualUser` or `Late` for drops; empty for successes |
 
 ### Progress Output
 

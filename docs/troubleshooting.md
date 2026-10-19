@@ -14,17 +14,20 @@ If you are new to CreoBench, start with [Concepts](concepts.md) for an overview 
 
 ## Dropped Transactions
 
-A **dropped** transaction is created but cannot be executed within the configured timeout. This commonly happens when
-no virtual user is available to execute it, or when the load generator cannot keep up with the requested load. Dropped
-transactions are reported in the console output and interval CSV; see [Outputs](outputs.md) for details.
+A **dropped** transaction is one whose request could not be sent within 10 ms of its scheduled arrival, or whose script
+failed before the request was sent. Any drop in the load phase means the load generators did not deliver the scheduled
+load, so the run is invalid. At the end of a run, CreoBench logs a summary of all drops by reason. Dropped transactions
+are also reported in the console output and the CSV files; see [Outputs](outputs.md) for details. The reason tells you
+what to fix:
 
-Long-running Lua code can also keep virtual users busy and reduce the generator’s capacity. Review dynamic
-specification and extraction functions, as well as any other script logic that runs before or after a request is sent.
-
-To reduce dropped transactions, increase the virtual user count with `--virtual-user-count` if the VU pool is exhausted,
-or reduce the load if the generator is at capacity. If the script is keeping VUs busy, simplify expensive computations
-and avoid unnecessary work. Also check any error messages for configuration problems, such as services referenced by the
-Lua script but missing from the [service registry](service-registry.md).
+- **`NoVirtualUser`**: no virtual user became free in time, so the VU pool is too small for the load. Increase
+  `--virtual-user-count` (see [Best practices](best-practices.md#virtual-user-count-sizing) for sizing), or check
+  whether the system under test responds more slowly than expected. Long-running Lua code also keeps virtual users busy;
+  review dynamic specification and extraction functions for expensive work.
+- **`Late`**: a virtual user was free, but the load generator only got to the transaction too late, so it lacks CPU.
+  Run it on a machine with more cores, or split the load across more load generator instances.
+- **`Error(...)`**: the script failed before the request was sent. Check the error message for configuration problems,
+  such as services referenced by the Lua script but missing from the [service registry](service-registry.md).
 
 See [Scripting](scripting.md) for the virtual user behavior scripting API, [Load profiles](load-profiles.md) for
 adjusting the load, and [Best practices](best-practices.md) for details on VU pool sizing.

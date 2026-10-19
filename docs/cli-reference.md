@@ -31,7 +31,7 @@ creo-orch [OPTIONS] --generator <ADDRESS>...
 | `--warmup`             | `-w`  | path   | No       | —       | Path to the [warmup](warmup.md) YAML file. If not provided, the orchestrator looks for `warmup.yaml` in the current directory.     |
 | `--output`             | `-o`  | path   | No       | —       | Directory where output files are written.                                                                                          |
 | `--virtual-user-count` | `-u`  | u32    | No       | —       | Number of virtual users per load generator instance. Must be at least 1.                                                           |
-| `--timeout`            | `-t`  | u64    | No       | —       | Transaction timeout in milliseconds.                                                                                               |
+| `--timeout`            | `-t`  | u64    | No       | —       | HTTP request timeout in milliseconds. Requests without a response in time count as timeouts. Without it, requests never time out.  |
 | `--seed`               | `-s`  | u64    | No       | —       | Seed for the random number generator.                                                                                              |
 | `--overwrite-outputs`  | —     | flag   | No       | off     | Overwrite existing output files instead of aborting when the output directory is not empty.                                        |
 

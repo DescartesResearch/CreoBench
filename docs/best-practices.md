@@ -23,36 +23,39 @@ across all instances. For example, running three load generators with `-u 100` c
 When a VU starts a transaction, it is taken out of the generator’s VU pool until the transaction finishes. Once the
 transaction completes, the VU is returned to the pool and can execute another transaction.
 
-If all VUs are currently executing transactions, newly scheduled transactions must wait for a VU to become available.
-If the wait exceeds the configured transaction timeout, the transaction is dropped instead of being executed. Dropped
-transactions can be seen in the CSV outputs or in the console output during a load test.
+Transactions are scheduled independently of whether a VU is free. If all VUs are busy, a newly scheduled transaction
+waits for the next free one, but at most 10 ms. If no VU becomes free in time, the transaction is dropped
+(`NoVirtualUser`), and since the scheduled load was not delivered, the run is invalid. Size the pool so that this
+practically never happens.
 
-A useful starting point for calculating the required number of virtual users to guarantee now queuing
-is [Little’s Law](https://en.wikipedia.org/wiki/Little%27s_law):
+On average, a load generator instance needs $a = \lambda \times W$ busy VUs
+([Little’s Law](https://en.wikipedia.org/wiki/Little%27s_law)), where:
+
+- $\lambda$ is the peak transaction rate per second **of this instance** in your load profile, and
+- $W$ is the mean time a VU is busy per transaction: the expected response time of the system under test, plus any
+  time spent in the script.
+
+Because arrivals are random, the number of transactions in progress fluctuates around $a$ with a standard deviation of
+$\sqrt{a}$, so the pool must cover the peaks, not the average:
 
 ```math
-L = \lambda \times W
+\text{VUs} = a + 7\sqrt{a}
 ```
 
-where:
+This keeps the chance of even a single drop below 1% for runs of up to a day. For short exploratory runs of about a
+minute, $a + 5\sqrt{a}$ suffices, but then a run is drop-free only with a probability of about 95%, and longer runs
+almost certainly drop transactions.
 
-- $L$ is the required number of VUs,
-- $\lambda$ is the maximum transactions in seconds in your load profile, and
-- $W$ is the expected average service time per transaction
+For instance, if your load profile sends a maximum of $200$ transactions per second and the expected response time is
+$250ms$, then $a = 200 \times 0.25 = 50$ and you need $50 + 7\sqrt{50} \approx 100$ VUs. The relative headroom shrinks
+for larger pools: at $10{,}000$ transactions per second and $92ms$, $a = 920$ and $1{,}133$ VUs suffice, only 23% more.
+Remember that the VU count is per instance: running the first example across two machines halves $\lambda$ per instance,
+so $a = 25$ and each instance needs $25 + 7\sqrt{25} = 60$ VUs.
 
-For instance, if your load profile sends a maximum of $200$ transactions per second and the expected service time is
-$250ms$, then you would need $200 \times 0.25 = 50$ virtual users in the pool. This calculation assumes perfect
-conditions. In practice, configure additional virtual users as headroom for service time variation, for short bursts
-above the average rate (arrivals are random, see [Load profiles](load-profiles.md)), and for delays introduced by the
-load generator instance. For example a pool of about 60 virtual users may be a reasonable starting point for this
-workload. Remember: The VU count is per instance, so running this load across two machines would only require 30 VUs
-per load generator instance.
-
-A large gap between response time (RT) and service time (ST) may be an indication of an exhausted or undersized VU pool.
-When the RT of a transaction is substantially higher than its ST, the transaction may be spending much of its time
-waiting for a free virtual user in the VU pool. However, a bottleneck on the load generator machine, such as CPU, memory,
-or network saturation, can also cause a large gap between ST and RT. Thus, a large gap does not necessarily indicate an
-undersized VU pool, but may imply the load generator machine's resources are insufficient for the target load.
+If you set `--timeout`, a VU is never busy for longer than the timeout. Sizing with $W$ equal to the timeout guarantees
+that the pool never runs out, however slow the system under test gets; slow responses then show up as timeouts instead
+of drops. Sizing with the expected response time needs fewer VUs, but drops if the system under test responds more
+slowly than expected.
 
 ---
 
