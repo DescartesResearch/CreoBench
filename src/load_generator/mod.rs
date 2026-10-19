@@ -1,5 +1,6 @@
 mod error;
 pub mod phases;
+pub mod runtime;
 
 pub use error::{Error, Result};
 
@@ -9,6 +10,13 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 pub async fn run() -> Result<()> {
     crate::log::setup();
+
+    if runtime::available_cores().get() == 1 {
+        tracing::warn!(
+            "Only one core is available, so the pacer shares it with request execution. \
+             Arrivals will not be dispatched precisely; use at least two cores."
+        );
+    }
 
     let cli = crate::cli::parse_or_exit::<LoadGeneratorCli>(std::env::args())?;
 
