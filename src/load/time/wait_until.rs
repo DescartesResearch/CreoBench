@@ -2,17 +2,20 @@ use std::time::{Duration, Instant};
 
 /// Waits shorter than this are spent busy-waiting instead of sleeping.
 ///
-/// Sleeping may overshoot its deadline by up to about a millisecond,
-/// depending on the operating system's timer slack and scheduler.
 /// Busy-waiting the final stretch makes sub-millisecond scheduling precise
 /// at the cost of keeping the waiting thread busy.
 const SPIN_THRESHOLD: Duration = Duration::from_millis(1);
 
 /// Blocks the current thread until `deadline`.
 ///
-/// Sleeps until shortly before the deadline and busy-waits for the rest.
-/// Returns immediately if the deadline has already passed, so the wait is
-/// never negative. Never returns before the deadline.
+/// Sleeps for half of the remaining time at a time until less than
+/// [`SPIN_THRESHOLD`] remains, then busy-waits for the rest. Operating
+/// systems may overshoot a sleep by a share of its length (on macOS, often a
+/// quarter of it, up to several milliseconds), so sleeping only half of the
+/// remaining time keeps every wake-up before the deadline, while the thread
+/// still sleeps for nearly the whole wait. Returns immediately if the
+/// deadline has already passed, so the wait is never negative. Never
+/// returns before the deadline.
 ///
 /// This blocks the calling thread, so it must not be called from an async
 /// task; use [`tokio::task::spawn_blocking`] instead.
@@ -27,7 +30,7 @@ pub fn wait_until(deadline: Instant) {
             }
             return;
         }
-        std::thread::sleep(remaining - SPIN_THRESHOLD);
+        std::thread::sleep(remaining / 2);
     }
 }
 
@@ -67,6 +70,38 @@ mod tests {
                 "returned before deadline for offset {offset:?}"
             );
         }
+    }
+
+    /// Checks that long waits end on time, too.
+    ///
+    /// Operating systems may overshoot long sleeps by several milliseconds
+    /// (about 2.5–4 ms for 20–100 ms sleeps on macOS), so sleeping until the
+    /// busy-wait window in one go wakes up too late. Requires most waits to
+    /// end within 2 µs, which only holds if every sleep ends before the
+    /// deadline.
+    #[test]
+    #[cfg_attr(
+        not(unix),
+        ignore = "high-resolution timing is unreliable on this platform"
+    )]
+    fn long_waits_end_within_2_microseconds() {
+        use rand::{RngExt, SeedableRng};
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(2);
+        let samples = 30;
+        let precise = (0..samples)
+            .filter(|_| {
+                let gap = Duration::from_millis(rng.random_range(20..60));
+                let deadline = Instant::now() + gap;
+                wait_until(deadline);
+                Instant::now().saturating_duration_since(deadline) < Duration::from_micros(2)
+            })
+            .count();
+
+        assert!(
+            precise * 2 >= samples,
+            "only {precise} of {samples} long waits ended within 2 µs"
+        );
     }
 
     /// Checks that short waits are busy-waited rather than slept.
