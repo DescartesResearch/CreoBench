@@ -18,6 +18,17 @@ impl StartTime {
         }
     }
 
+    /// Creates a start time at a scheduled arrival rather than at the current time.
+    ///
+    /// Response times and wait times are then measured from the scheduled
+    /// arrival, so any delay in dispatching a transaction is part of them.
+    pub fn scheduled(time_zero: LoadTestTime, offset: RelativeLoadTestTime) -> Self {
+        Self {
+            instant: time_zero + offset,
+            relative_to_start: offset,
+        }
+    }
+
     pub fn elapsed(&self) -> ResponseTime {
         ResponseTime::new(self.instant.elapsed().as_duration())
     }
@@ -76,6 +87,29 @@ mod tests {
         let second = start_time.relative_to_start();
 
         assert_eq!(first, second);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn scheduled_start_time_is_relative_to_time_zero() {
+        let time_zero = LoadTestTime::now();
+        let offset = RelativeLoadTestTime::new(Duration::from_millis(10));
+
+        let start_time = StartTime::scheduled(time_zero, offset);
+
+        assert_eq!(start_time.relative_to_start(), offset);
+    }
+
+    #[test]
+    fn scheduled_start_time_in_the_past_includes_lag_in_elapsed() {
+        let time_zero = LoadTestTime::now();
+        std::thread::sleep(Duration::from_millis(20));
+
+        let start_time = StartTime::scheduled(
+            time_zero,
+            RelativeLoadTestTime::new(Duration::from_millis(5)),
+        );
+
+        assert!(start_time.elapsed() >= Duration::from_millis(15));
     }
 
     #[tokio::test(start_paused = true)]

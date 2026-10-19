@@ -42,6 +42,14 @@ impl Add<LoadStepDeadline> for LoadTestTime {
     }
 }
 
+impl Add<RelativeLoadTestTime> for LoadTestTime {
+    type Output = Self;
+
+    fn add(self, rhs: RelativeLoadTestTime) -> Self::Output {
+        Self(self.0 + rhs.0)
+    }
+}
+
 impl Sub<LoadStepStart> for LoadTestTime {
     type Output = Duration;
 

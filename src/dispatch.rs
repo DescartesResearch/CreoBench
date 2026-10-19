@@ -38,19 +38,22 @@ where
         target_time: RelativeLoadTestTime,
         time_zero: LoadTestTime,
     ) {
-        self.tracker.log_dispatched(batch.size().into());
         for _ in 0..batch.size() {
-            let loadgenerator_id = self.loadgenerator_id;
-            let pool = self.pool.clone();
-            let tracker = self.tracker.clone();
-            let transaction =
-                Transaction::new(loadgenerator_id, StartTime::now(time_zero), target_time);
-            tokio::spawn(async move {
-                let virtual_user = pool.acquire().await;
-                let result = virtual_user.send_next_request(pool, transaction).await;
-                tracker.log_result(result);
-            });
+            self.dispatch(StartTime::now(time_zero), target_time);
         }
+    }
+
+    /// Dispatches a single transaction that starts at `start_time`.
+    pub fn dispatch(&self, start_time: StartTime, target_time: RelativeLoadTestTime) {
+        self.tracker.log_dispatched(1);
+        let pool = self.pool.clone();
+        let tracker = self.tracker.clone();
+        let transaction = Transaction::new(self.loadgenerator_id, start_time, target_time);
+        tokio::spawn(async move {
+            let virtual_user = pool.acquire().await;
+            let result = virtual_user.send_next_request(pool, transaction).await;
+            tracker.log_result(result);
+        });
     }
 }
 
@@ -170,6 +173,30 @@ mod tests {
                 "expected start_time {start_time:?} < target_time {target_time:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn dispatch_keeps_scheduled_start_time() {
+        let (dispatcher, tracker) = dispatcher_from(4, 2).await;
+        let time_zero = LoadTestTime::now();
+        let offsets = [
+            Duration::ZERO,
+            Duration::from_micros(250),
+            Duration::from_millis(3),
+        ];
+        let target_time = RelativeLoadTestTime::new(Duration::from_secs(1));
+
+        for offset in offsets {
+            let start_time = StartTime::scheduled(time_zero, RelativeLoadTestTime::new(offset));
+            dispatcher.dispatch(start_time, target_time);
+        }
+        wait(&tracker).await;
+
+        let stats = tracker.interval_statistics();
+        let mut start_times: Vec<_> = stats.results().iter().map(start_time_of).collect();
+        start_times.sort();
+        let expected: Vec<_> = offsets.into_iter().map(RelativeLoadTestTime::new).collect();
+        assert_eq!(start_times, expected);
     }
 
     #[tokio::test]
