@@ -2,14 +2,15 @@ pub mod config;
 mod distribute;
 mod error;
 pub mod io;
+pub mod metadata;
 pub mod persist;
 pub mod phases;
 pub mod runner;
+mod summary;
 
 pub use config::LoadTestConfig;
-pub use distribute::{distribute_count, distribute_profile};
+pub use distribute::{distribute_profile, distribute_warmup};
 pub use error::{ConfigError, Error, OutputError, Result};
-pub use phases::ConnectHandle;
 
 use crate::cli::OrchestratorCli;
 

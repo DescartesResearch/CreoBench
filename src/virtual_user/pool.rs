@@ -146,17 +146,23 @@ impl<T: HttpClient + Clone + 'static, R: RangeRNG + Send + Sync + 'static> Pool<
     pub async fn acquire(&self) -> VirtualUser<Loop, T> {
         // Semaphore represents ownership of an available user.
         let permit = self.inner.available.acquire().await.unwrap();
-
-        let user = {
-            let (ref mut users, ref mut rng) = *self.inner.data.lock();
-
-            let index = rng.random_range(0..users.len());
-            users.swap_remove(index)
-        };
-
         // Do not put permit back yet, since the user is not released back to the pool yet.
         permit.forget();
-        user
+        self.take_random_user()
+    }
+
+    /// Takes a free virtual user without waiting, if there is one.
+    pub fn try_acquire(&self) -> Option<VirtualUser<Loop, T>> {
+        let permit = self.inner.available.try_acquire().ok()?;
+        permit.forget();
+        Some(self.take_random_user())
+    }
+
+    /// Removes a random user from the pool. The caller must hold a permit for it.
+    fn take_random_user(&self) -> VirtualUser<Loop, T> {
+        let (ref mut users, ref mut rng) = *self.inner.data.lock();
+        let index = rng.random_range(0..users.len());
+        users.swap_remove(index)
     }
 
     /// Releases a virtual user back into the pool.

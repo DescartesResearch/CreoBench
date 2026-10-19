@@ -7,7 +7,7 @@ use super::csv::escape_field;
 use super::{PersistError, Persister, Phase};
 
 pub const FILE_NAME: &str = "transactions.csv";
-const HEADER: &str = "target_time,start_time,load_generator_id,virtual_user_id,spec_id,response_time_ms,service_time_ms,outcome,reason";
+const HEADER: &str = "target_time,start_time,send_time,load_generator_id,virtual_user_id,spec_id,response_time_ms,service_time_ms,outcome,reason";
 
 pub struct TransactionCsvPersister<W: Write> {
     writer: BufWriter<W>,
@@ -31,7 +31,7 @@ impl<W: Write> TransactionCsvPersister<W> {
                     metadata.start_time,
                     metadata.target_time,
                     metadata.loadgenerator_id.get(),
-                    metadata.virtual_user_id,
+                    metadata.virtual_user_id.to_string(),
                     response_time.as_millis(),
                 ),
                 TransactionResult::Failed {
@@ -42,7 +42,7 @@ impl<W: Write> TransactionCsvPersister<W> {
                     metadata.start_time,
                     metadata.target_time,
                     metadata.loadgenerator_id.get(),
-                    metadata.virtual_user_id,
+                    metadata.virtual_user_id.to_string(),
                     response_time.as_millis(),
                 ),
                 TransactionResult::Timeout {
@@ -53,7 +53,7 @@ impl<W: Write> TransactionCsvPersister<W> {
                     metadata.start_time,
                     metadata.target_time,
                     metadata.loadgenerator_id.get(),
-                    metadata.virtual_user_id,
+                    metadata.virtual_user_id.to_string(),
                     response_time.as_millis(),
                 ),
                 TransactionResult::Dropped {
@@ -64,10 +64,21 @@ impl<W: Write> TransactionCsvPersister<W> {
                     metadata.start_time,
                     metadata.target_time,
                     metadata.loadgenerator_id.get(),
-                    metadata.virtual_user_id,
+                    metadata
+                        .virtual_user_id
+                        .map(|id| id.to_string())
+                        .unwrap_or_default(),
                     response_time.as_millis(),
                 ),
             };
+        let send_time = match result {
+            TransactionResult::Success { metadata, .. }
+            | TransactionResult::Failed { metadata, .. }
+            | TransactionResult::Timeout { metadata, .. } => {
+                metadata.send_time.as_secs_f64().to_string()
+            }
+            TransactionResult::Dropped { .. } => String::new(),
+        };
         let (spec_id, service_time_ms, outcome, reason) = match result {
             TransactionResult::Success {
                 metadata,
@@ -108,8 +119,9 @@ impl<W: Write> TransactionCsvPersister<W> {
         let fields = [
             target_time.as_secs_f64().to_string(),
             start_time.as_secs_f64().to_string(),
+            send_time,
             load_generator_id.to_string(),
-            virtual_user_id.to_string(),
+            virtual_user_id,
             spec_id,
             response_time_ms.to_string(),
             service_time_ms,
@@ -171,8 +183,33 @@ mod tests {
         let output = String::from_utf8(persister.into_inner()).unwrap();
         assert_eq!(
             output,
-            "target_time,start_time,load_generator_id,virtual_user_id,spec_id,response_time_ms,service_time_ms,outcome,reason\n"
+            "target_time,start_time,send_time,load_generator_id,virtual_user_id,spec_id,response_time_ms,service_time_ms,outcome,reason\n"
         );
+    }
+
+    fn send_time_field(row: &str) -> &str {
+        row.split(',').nth(2).unwrap()
+    }
+
+    #[test]
+    fn sent_row_renders_send_time() {
+        // Test results are sent right at their start.
+        let result = success_result(0, 0, 250, 1000, 100);
+
+        let persister = TransactionCsvPersister::new(Vec::new()).unwrap();
+        let row = persister.format_row(&result);
+
+        assert_eq!(send_time_field(&row), "0.25");
+    }
+
+    #[test]
+    fn dropped_row_renders_empty_send_time() {
+        let result = dropped_result(3, 1900, 2000, DroppedCode::Error("wait timed out".into()));
+
+        let persister = TransactionCsvPersister::new(Vec::new()).unwrap();
+        let row = persister.format_row(&result);
+
+        assert_eq!(send_time_field(&row), "");
     }
 
     #[ignore = "refactor"]

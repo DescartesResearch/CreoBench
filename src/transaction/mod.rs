@@ -1,14 +1,12 @@
-mod batch;
 mod id;
 mod metadata;
 mod result;
 
-pub use batch::Batch;
 pub use id::{LoadGeneratorId, SpecId};
 pub use metadata::Metadata;
 pub use result::{DroppedCode, FailedCode, TimeoutCode, TransactionResult};
 
-use crate::load::{RelativeLoadTestTime, ServiceTime, StartTime};
+use crate::load::{RelativeLoadTestTime, RequestTiming, StartTime};
 use crate::virtual_user::VirtualUserId;
 
 use self::metadata::{DroppedMetadata, ResultMetadata};
@@ -36,9 +34,15 @@ impl Transaction {
         self.metadata.start_time
     }
 
+    /// A timing for a request of this transaction sent right at its start.
+    #[cfg(test)]
+    pub(crate) fn sent_at_start(&self, service_time: crate::load::ServiceTime) -> RequestTiming {
+        RequestTiming::sent_after(self.start_time(), std::time::Duration::ZERO, service_time)
+    }
+
     pub fn into_dropped(
         self,
-        virtual_user_id: VirtualUserId,
+        virtual_user_id: Option<VirtualUserId>,
         code: DroppedCode,
     ) -> TransactionResult {
         TransactionResult::Dropped {
@@ -57,7 +61,7 @@ impl Transaction {
         self,
         virtual_user_id: VirtualUserId,
         spec_id: SpecId,
-        service_time: ServiceTime,
+        timing: RequestTiming,
     ) -> TransactionResult {
         TransactionResult::Success {
             metadata: ResultMetadata {
@@ -65,10 +69,14 @@ impl Transaction {
                 virtual_user_id,
                 loadgenerator_id: self.metadata.loadgenerator_id,
                 start_time: self.metadata.start_time.relative_to_start(),
+                send_time: self
+                    .metadata
+                    .start_time
+                    .relative_to_start_of(timing.sent_at),
                 target_time: self.metadata.target_time,
             },
             response_time: self.start_time().elapsed(),
-            service_time,
+            service_time: timing.service_time,
         }
     }
 
@@ -76,7 +84,7 @@ impl Transaction {
         self,
         virtual_user_id: VirtualUserId,
         spec_id: SpecId,
-        service_time: ServiceTime,
+        timing: RequestTiming,
         code: FailedCode,
     ) -> TransactionResult {
         TransactionResult::Failed {
@@ -85,10 +93,14 @@ impl Transaction {
                 virtual_user_id,
                 loadgenerator_id: self.metadata.loadgenerator_id,
                 start_time: self.metadata.start_time.relative_to_start(),
+                send_time: self
+                    .metadata
+                    .start_time
+                    .relative_to_start_of(timing.sent_at),
                 target_time: self.metadata.target_time,
             },
             response_time: self.start_time().elapsed(),
-            service_time,
+            service_time: timing.service_time,
             code,
         }
     }
@@ -97,7 +109,7 @@ impl Transaction {
         self,
         virtual_user_id: VirtualUserId,
         spec_id: SpecId,
-        service_time: ServiceTime,
+        timing: RequestTiming,
         code: TimeoutCode,
     ) -> TransactionResult {
         TransactionResult::Timeout {
@@ -106,10 +118,14 @@ impl Transaction {
                 virtual_user_id,
                 loadgenerator_id: self.metadata.loadgenerator_id,
                 start_time: self.metadata.start_time.relative_to_start(),
+                send_time: self
+                    .metadata
+                    .start_time
+                    .relative_to_start_of(timing.sent_at),
                 target_time: self.metadata.target_time,
             },
             response_time: self.start_time().elapsed(),
-            service_time,
+            service_time: timing.service_time,
             code,
         }
     }
@@ -120,8 +136,11 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::load::{LoadTestTime, RelativeLoadTestTime, StartTime};
+    use crate::load::{LoadTestTime, RelativeLoadTestTime, ServiceTime, StartTime};
     use crate::virtual_user::VirtualUserId;
+
+    /// Delay between the start of a transaction and sending its request.
+    const SEND_DELAY: Duration = Duration::from_millis(3);
 
     fn sample_transaction() -> (
         Transaction,
@@ -149,12 +168,17 @@ mod tests {
             virtual_user_id: actual_virtual_user_id,
             loadgenerator_id: actual_loadgenerator_id,
             start_time: actual_start_time,
+            send_time: actual_send_time,
             target_time: actual_target_time,
         } = metadata;
         assert_eq!(actual_spec_id, spec_id);
         assert_eq!(actual_virtual_user_id, virtual_user_id);
         assert_eq!(actual_loadgenerator_id, loadgenerator_id);
         assert_eq!(actual_start_time, start_time.relative_to_start());
+        assert_eq!(
+            actual_send_time.as_duration(),
+            start_time.relative_to_start().as_duration() + SEND_DELAY
+        );
         assert_eq!(actual_target_time, target_time);
     }
 
@@ -171,7 +195,7 @@ mod tests {
             start_time: actual_start_time,
             target_time: actual_target_time,
         } = metadata;
-        assert_eq!(actual_virtual_user_id, virtual_user_id);
+        assert_eq!(actual_virtual_user_id, Some(virtual_user_id));
         assert_eq!(actual_loadgenerator_id, loadgenerator_id);
         assert_eq!(actual_start_time, start_time.relative_to_start());
         assert_eq!(actual_target_time, target_time);
@@ -183,8 +207,9 @@ mod tests {
         let virtual_user_id = VirtualUserId::new(42);
         let spec_id = SpecId::new(3);
         let service_time = ServiceTime::new(Duration::from_millis(120));
+        let timing = RequestTiming::sent_after(start_time, SEND_DELAY, service_time);
 
-        let result = transaction.into_success(virtual_user_id, spec_id, service_time);
+        let result = transaction.into_success(virtual_user_id, spec_id, timing);
 
         match result {
             TransactionResult::Success {
@@ -212,9 +237,10 @@ mod tests {
         let virtual_user_id = VirtualUserId::new(11);
         let spec_id = SpecId::new(4);
         let service_time = ServiceTime::new(Duration::from_millis(75));
+        let timing = RequestTiming::sent_after(start_time, SEND_DELAY, service_time);
         let code = FailedCode::Status(503);
 
-        let result = transaction.into_failed(virtual_user_id, spec_id, service_time, code.clone());
+        let result = transaction.into_failed(virtual_user_id, spec_id, timing, code.clone());
 
         match result {
             TransactionResult::Failed {
@@ -244,9 +270,10 @@ mod tests {
         let virtual_user_id = VirtualUserId::new(13);
         let spec_id = SpecId::new(5);
         let service_time = ServiceTime::new(Duration::from_millis(2_000));
+        let timing = RequestTiming::sent_after(start_time, SEND_DELAY, service_time);
         let code = TimeoutCode::Error("deadline exceeded".to_string());
 
-        let result = transaction.into_timeout(virtual_user_id, spec_id, service_time, code.clone());
+        let result = transaction.into_timeout(virtual_user_id, spec_id, timing, code.clone());
 
         match result {
             TransactionResult::Timeout {
@@ -276,7 +303,7 @@ mod tests {
         let virtual_user_id = VirtualUserId::new(99);
         let code = DroppedCode::Error("runner error".to_string());
 
-        let result = transaction.into_dropped(virtual_user_id, code.clone());
+        let result = transaction.into_dropped(Some(virtual_user_id), code.clone());
 
         match result {
             TransactionResult::Dropped {

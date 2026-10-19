@@ -127,8 +127,9 @@ than cold-start effects. See [Warmup](warmup.md) for configuration details.
 
 At startup, the orchestrator distributes the test configuration -- such as the
 load profile, script, service registry, and warmup settings -- to the load
-generator instances. It also divides the load profile equally among the
-instances so that they can generate the required total load together.
+generator instances. It also divides the load profile and the warmup rate
+equally among the instances so that they can generate the required total
+load together.
 
 Each load generator instance then creates its virtual users and executes the
 setup transactions defined by the script. After completing setup, the
@@ -141,19 +142,31 @@ continuously checks that the instances remain synchronized. If an instance
 falls out of sync, the orchestrator aborts the load test.
 
 During each load interval, a load generator instance uses its assigned
-portion of the load profile to determine how many transactions to send
-before the interval's deadline. It spreads those transactions across the
-interval to maintain the target rate. Transactions are grouped into
-**batches**, which are small groups of transactions scheduled to start
-at approximately the same time. Between batches, the load generator waits
-briefly before scheduling the next group.
+portion of the load profile as a target rate: the interval's transaction
+count divided by its duration. Transactions arrive as a **Poisson
+process** at that rate, so the time between two consecutive transactions
+is exponentially distributed and independent of all others. The number of
+transactions in an interval therefore varies around its target count. Since
+each instance generates an independent Poisson process, the transactions of
+all instances together again form a Poisson process at the total rate.
 
-Each transaction in a batch is assigned to an available virtual user. The
-virtual user runs the next step in its script, sends the corresponding HTTP
-request, and passes the response back to the script. CreoBench records the
-outcome of every transaction, including transactions that fail, time out,
-or cannot be sent—for example, because the load generator is too busy to
-schedule them in time.
+A dedicated pacing thread dispatches each transaction at its scheduled
+arrival time. It sleeps until shortly before an arrival and busy-waits for
+the last millisecond, which keeps dispatching precise to a few microseconds
+even at tens of thousands of transactions per second. Each transaction
+records its scheduled arrival as its start time, so any delay in sending it
+is included in its response time.
+
+Each transaction is assigned to an available virtual user. If all virtual
+users are busy, the transaction waits for the next free one. The virtual
+user runs the next step in its script, sends the corresponding HTTP request,
+and passes the response back to the script. CreoBench records the outcome of
+every transaction, including transactions that fail, time out, or are
+dropped. A transaction is dropped if its request cannot be sent within 10 ms
+of its scheduled arrival, because no virtual user became free in time or the
+load generator got to it too late. Requests are never sent late, so the
+system under test always sees the scheduled arrivals, and drops reveal that
+the load generators could not deliver the scheduled load.
 
 ---
 
@@ -195,10 +208,10 @@ when the HTTP request is sent and ends when a response is received or the
 request reaches a terminal outcome, such as a failure or timeout. A dropped
 transaction has no service time because its HTTP request was never sent.
 
-The difference between response time and service time shows how much time
-was spent before the request reached the service. A large difference can
-indicate that the load generator does not have enough available virtual
-users or resources to schedule transactions on time.
+The difference between response time and service time is the time spent in
+the load generator: before the request was sent, which is at most 10 ms since
+later requests are dropped, and in the script's extract function after the
+response arrived.
 
 See [Outputs](outputs.md) for a detailed description of the available
 results.

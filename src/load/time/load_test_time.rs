@@ -3,8 +3,6 @@ use std::time::{Duration, Instant};
 
 use crate::wire::LoadStepDeadline;
 
-use super::LoadStepStart;
-
 /// Represents a specific point in time in a load test.
 ///
 /// This wrapper around [`std::time::Instant`] ensures type safety by preventing
@@ -33,6 +31,12 @@ impl LoadTestTime {
     }
 }
 
+impl From<LoadTestTime> for Instant {
+    fn from(value: LoadTestTime) -> Self {
+        value.0
+    }
+}
+
 impl Add<LoadStepDeadline> for LoadTestTime {
     type Output = Self;
 
@@ -42,11 +46,11 @@ impl Add<LoadStepDeadline> for LoadTestTime {
     }
 }
 
-impl Sub<LoadStepStart> for LoadTestTime {
-    type Output = Duration;
+impl Add<RelativeLoadTestTime> for LoadTestTime {
+    type Output = Self;
 
-    fn sub(self, rhs: LoadStepStart) -> Self::Output {
-        self.0 - rhs.0
+    fn add(self, rhs: RelativeLoadTestTime) -> Self::Output {
+        Self(self.0 + rhs.0)
     }
 }
 

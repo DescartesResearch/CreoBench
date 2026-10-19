@@ -1,9 +1,7 @@
 use url::Url;
 
-use std::time::Duration;
-
 use crate::http::{self, HttpClient, HttpResponse};
-use crate::load::{ServiceTime, ServiceTimeMeasurement};
+use crate::load::{RequestTiming, ServiceTimeMeasurement};
 use crate::script::{HTTPStaticRequestSpec, Response, ScriptRunner};
 use crate::wire::ServiceRegistry;
 
@@ -30,11 +28,6 @@ impl<T: HttpClient> HttpExecutor<T> {
         }
     }
 
-    /// Return the underlying [`HttpClient`]'s timeout.
-    pub fn timeout(&self) -> Duration {
-        self.client.timeout()
-    }
-
     /// Execute a HTTP request as defined by the given [`HTTPStaticRequestSpec`].
     ///
     /// This method measures the response time of the sent request using
@@ -52,33 +45,27 @@ impl<T: HttpClient> HttpExecutor<T> {
         spec: &HTTPStaticRequestSpec,
         registry: &ServiceRegistry,
         runner: &ScriptRunner,
-    ) -> Result<ServiceTime, HttpExecuteError> {
+    ) -> Result<RequestTiming, HttpExecuteError> {
         let url = resolve_url(spec, registry)?;
 
-        let service_time_start = ServiceTimeMeasurement::now();
+        let measurement = ServiceTimeMeasurement::now();
         let response = self.send_with_cookies(&url, spec).await;
-        let service_time = service_time_start.elapsed();
+        let timing = measurement.finish();
 
         let response = match response {
             Ok(response) => response,
             Err(http::RequestError::Timeout(message)) => {
-                return Err(HttpExecuteError::Timeout {
-                    message,
-                    service_time,
-                });
+                return Err(HttpExecuteError::Timeout { message, timing });
             }
             Err(http::RequestError::Failed(message)) => {
-                return Err(HttpExecuteError::Failed {
-                    message,
-                    service_time,
-                });
+                return Err(HttpExecuteError::Failed { message, timing });
             }
         };
 
         if response.status >= 400 {
             return Err(HttpExecuteError::Status {
                 code: response.status,
-                service_time,
+                timing,
             });
         }
 
@@ -86,11 +73,11 @@ impl<T: HttpClient> HttpExecutor<T> {
         runner
             .run_http_extract(spec, script_response)
             .map_err(|source| HttpExecuteError::Extract {
-                source,
-                service_time,
+                source: Box::new(source),
+                timing,
             })?;
 
-        Ok(service_time)
+        Ok(timing)
     }
 
     /// Send the HTTP request including cookies matching the given URL (if any).
@@ -277,12 +264,9 @@ mod tests {
             .unwrap_err();
 
         match err {
-            HttpExecuteError::Timeout {
-                message,
-                service_time,
-            } => {
+            HttpExecuteError::Timeout { message, timing } => {
                 assert_eq!(message, "request timeout");
-                assert_ne!(service_time, ServiceTime::new(Duration::ZERO));
+                assert_ne!(timing.service_time, ServiceTime::new(Duration::ZERO));
             }
             other => panic!("expected Timeout, got {other:?}"),
         }
@@ -302,12 +286,9 @@ mod tests {
             .unwrap_err();
 
         match err {
-            HttpExecuteError::Failed {
-                message,
-                service_time,
-            } => {
+            HttpExecuteError::Failed { message, timing } => {
                 assert_eq!(message, "connection refused");
-                assert_ne!(service_time, ServiceTime::new(Duration::ZERO));
+                assert_ne!(timing.service_time, ServiceTime::new(Duration::ZERO));
             }
             other => panic!("expected Failed, got {other:?}"),
         }
@@ -318,9 +299,9 @@ mod tests {
         let (runner, spec, registry, client) = executor_fixture(ScenarioBuilder::default()).await;
         let mut executor = HttpExecutor::new(client);
 
-        let service_time = executor.execute(&spec, &registry, &runner).await.unwrap();
+        let timing = executor.execute(&spec, &registry, &runner).await.unwrap();
 
-        assert_ne!(service_time, ServiceTime::new(Duration::ZERO));
+        assert_ne!(timing.service_time, ServiceTime::new(Duration::ZERO));
     }
 
     #[tokio::test]
@@ -336,9 +317,9 @@ mod tests {
             .unwrap_err();
 
         match err {
-            HttpExecuteError::Status { code, service_time } => {
+            HttpExecuteError::Status { code, timing } => {
                 assert_eq!(code, 404);
-                assert_ne!(service_time, ServiceTime::new(Duration::ZERO));
+                assert_ne!(timing.service_time, ServiceTime::new(Duration::ZERO));
             }
             other => panic!("expected Status, got {other:?}"),
         }
@@ -357,9 +338,9 @@ mod tests {
             .unwrap_err();
 
         match err {
-            HttpExecuteError::Status { code, service_time } => {
+            HttpExecuteError::Status { code, timing } => {
                 assert_eq!(code, 503);
-                assert_ne!(service_time, ServiceTime::new(Duration::ZERO));
+                assert_ne!(timing.service_time, ServiceTime::new(Duration::ZERO));
             }
             other => panic!("expected Status, got {other:?}"),
         }
@@ -382,12 +363,9 @@ mod tests {
             .unwrap_err();
 
         match err {
-            HttpExecuteError::Extract {
-                source,
-                service_time,
-            } => {
+            HttpExecuteError::Extract { source, timing } => {
                 assert!(source.to_string().contains("failure"));
-                assert_ne!(service_time, ServiceTime::new(Duration::ZERO));
+                assert_ne!(timing.service_time, ServiceTime::new(Duration::ZERO));
             }
             other => panic!("expected Extract, got {other:?}"),
         }

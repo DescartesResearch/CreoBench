@@ -2,13 +2,15 @@ use std::sync::Arc;
 
 use crate::orchestrator::config::LoadTestConfig;
 use crate::orchestrator::io::OutputDir;
+use crate::orchestrator::metadata::{self, GeneratorMetadata, RunMetadata};
 use crate::orchestrator::persist::{
     ConsolePersister, IntervalCsvPersister, PersistError, Persister, PhaseClassifier,
     TransactionCsvPersister, interval, transactions, writer_loop,
 };
 use crate::orchestrator::phases::collect::CollectError;
 use crate::orchestrator::phases::{ConnectHandle, GeneratorHandle, collect_reports};
-use crate::orchestrator::{Error, Result, distribute_profile};
+use crate::orchestrator::summary::DropSummary;
+use crate::orchestrator::{Error, Result, distribute_profile, distribute_warmup};
 use crate::tracker::IntervalReport;
 use crate::transaction::LoadGeneratorId;
 use crate::wire::command::Command;
@@ -31,11 +33,15 @@ impl LoadTestRunner {
     }
 
     pub async fn run(self) -> Result<()> {
+        let started_at = metadata::now();
         let output_dir = OutputDir::new(
             self.config.output_dir.clone(),
             self.config.overwrite_outputs,
         )
         .await?;
+        for (name, input) in self.config.inputs.named() {
+            output_dir.write_file(name, &input.contents).await?;
+        }
 
         let load_generator_ids = (0..self.handles.len())
             .map(u8::try_from)
@@ -45,6 +51,7 @@ impl LoadTestRunner {
             .map(LoadGeneratorId::new);
 
         let split_profiles = distribute_profile(&self.config.profile, self.handles.len());
+        let split_warmups = distribute_warmup(&self.config.warmup, self.handles.len());
 
         // Phase 1: connect all (collect all results)
         tracing::info!("Connecting to all load generator instances...");
@@ -90,35 +97,38 @@ impl LoadTestRunner {
         assert_eq!(connected.len(), split_profiles.len());
         tracing::info!("Sending load-generator configuration to load generator instances...");
         let mut tasks = Vec::with_capacity(connected.len());
-        for (id, (handle, profile)) in load_generator_ids
-            .into_iter()
-            .zip(connected.into_iter().zip(&split_profiles))
-        {
+        for (id, ((handle, profile), warmup)) in load_generator_ids.into_iter().zip(
+            connected
+                .into_iter()
+                .zip(&split_profiles)
+                .zip(split_warmups),
+        ) {
             let config_msg = ConfigMessage::Config(LoadGeneratorConfig {
                 profile: LoadProfile::from(profile.clone()),
                 script: Arc::clone(&self.config.script),
                 registry: ServiceRegistry::from(self.config.registry.clone()),
-                warmup: Warmup::from(self.config.warmup.clone()),
+                warmup: Warmup::from(warmup),
                 virtual_user_count: self.config.virtual_user_count,
                 seed: self.config.seed,
                 timeout_ms: self.config.timeout_ms,
                 load_generator_id: id,
             });
-            tasks.push(tokio::spawn(
-                async move { handle.configure(&config_msg).await },
-            ));
+            let task = tokio::spawn(async move { handle.configure(&config_msg).await });
+            tasks.push((id, task));
         }
 
         let mut configured = Vec::with_capacity(tasks.len());
+        let mut generators = Vec::with_capacity(tasks.len());
         let mut all_ready = true;
-        for (id, task) in tasks.into_iter().enumerate() {
+        for (id, task) in tasks {
             match task.await.expect("task panicked") {
-                Ok(start_handle) => {
-                    tracing::debug!("Loadgenerator `{}` is ready.", id);
+                Ok((start_handle, info)) => {
+                    tracing::debug!("Loadgenerator `{}` is ready.", id.get());
                     configured.push(start_handle);
+                    generators.push(GeneratorMetadata { id: id.get(), info });
                 }
                 Err(err) => {
-                    tracing::error!("Failed to setup Loadgenerator `{}`: {}", id, err);
+                    tracing::error!("Failed to setup Loadgenerator `{}`: {}", id.get(), err);
                     all_ready = false;
                 }
             }
@@ -179,7 +189,9 @@ impl LoadTestRunner {
             error_tx,
         ));
 
-        let collect_outcome = collect_and_persist(&mut handles, &report_tx, &mut error_rx).await;
+        let mut summary = DropSummary::new(self.config.warmup.duration, self.config.warmup.pause);
+        let collect_outcome =
+            collect_and_persist(&mut handles, &report_tx, &mut error_rx, &mut summary).await;
         drop(report_tx);
         writer_task.await.expect("writer task panicked");
 
@@ -188,6 +200,21 @@ impl LoadTestRunner {
                 Ok(err) => Err(Error::Persist(err)),
                 Err(_) => {
                     tracing::info!("Load test finished.");
+                    summary.log();
+                    let metadata = RunMetadata {
+                        version: env!("CARGO_PKG_VERSION"),
+                        started_at,
+                        finished_at: metadata::now(),
+                        valid: summary.is_valid(),
+                        virtual_user_count: self.config.virtual_user_count,
+                        timeout_ms: Some(self.config.timeout_ms).filter(|&ms| ms > 0),
+                        seed: self.config.seed,
+                        generators,
+                        drops: summary.report(),
+                    };
+                    let json = serde_json::to_vec_pretty(&metadata)
+                        .expect("run metadata serializes to JSON");
+                    output_dir.write_file(metadata::FILE_NAME, &json).await?;
                     Ok(())
                 }
             },
@@ -249,11 +276,13 @@ async fn collect_and_persist(
     handles: &mut Vec<GeneratorHandle>,
     report_tx: &tokio::sync::mpsc::Sender<IntervalReport>,
     error_rx: &mut tokio::sync::oneshot::Receiver<PersistError>,
+    summary: &mut DropSummary,
 ) -> CollectOutcome {
     loop {
         tokio::select! {
             outcome = collect_reports(handles) => match outcome {
                 Ok(Some(report)) => {
+                    summary.record(&report);
                     if report_tx.send(report).await.is_err() {
                         break CollectOutcome::PersistFailed(
                             error_rx.try_recv().expect(

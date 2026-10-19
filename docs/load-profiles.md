@@ -39,21 +39,24 @@ deadline,count
 ## Understanding Load Intervals and Transaction Pacing
 
 **Load intervals** are the building blocks of your profile. Each interval represents
-the time window between two consecutive deadlines, and CreoBench distributes your
-transactions across that period using an exponential distribution. This mimics
-real-world traffic patterns where request arrivals are independent events and
-the timing of one request doesn't influence the next.
+the time window between two consecutive deadlines. Within an interval, CreoBench
+generates transactions as a Poisson process whose rate is the interval's `count`
+divided by its duration: the time between two consecutive transactions is
+exponentially distributed and independent of all others. This mimics real-world
+traffic patterns where request arrivals are independent events and the timing of
+one request doesn't influence the next.
 
 The **first interval** starts at t=0 (the beginning of the load phase) and runs
 until your first deadline. Each subsequent interval spans from one deadline to
-the next. During each interval, CreoBench sends exactly the number of transactions
-specified in the `count` column
+the next. Because arrivals are random, the number of transactions in an interval
+is not exactly `count` but varies around it, with a standard deviation of about
+`sqrt(count)`. Over many intervals, the average matches the profile.
 
 Consider the profile from above:
 
-- From 0s to 1s, CreoBench sends 10 transactions (10 TPS).
-- From 1s to 2s, CreoBench sends 20 transactions (20 TPS).
-- From 2s to 3s, CreoBench sends 20 transactions (20 TPS).
+- From 0s to 1s, CreoBench sends transactions at 10 TPS, on average 10.
+- From 1s to 2s, CreoBench sends transactions at 20 TPS, on average 20.
+- From 2s to 3s, CreoBench sends transactions at 20 TPS, on average 20.
 
 Deadlines are absolute, not relative to the previous step. A deadline of
 `3.0` always means three seconds after the load test started, regardless of

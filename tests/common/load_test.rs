@@ -13,6 +13,12 @@ use creo_bench::test_utils::prelude::*;
 pub struct LoadTestConfig {
     /// The total number of requests the load test dispatches.
     pub total_requests: u32,
+    /// The target request count of each load step, across all generators.
+    pub step_counts: Vec<u32>,
+    /// The number of load generator instances.
+    pub generator_count: u8,
+    /// The number of virtual users per load generator.
+    pub virtual_user_count: u32,
     /// The user specs in spec-id order.
     pub user_specs: Vec<Spec>,
     /// The warmup duration of the load test.
@@ -23,6 +29,11 @@ pub struct LoadTestConfig {
     pub warmup_pause: u32,
     /// The number of intervals in the load test.
     pub interval_count: usize,
+    /// The seed of the load test.
+    pub seed: u64,
+    /// The contents of the input files, by the names of their copies in the
+    /// output directory.
+    pub inputs: Vec<(&'static str, String)>,
 
     _server: HttpTestServer,
 }
@@ -51,16 +62,23 @@ impl LoadTestConfig {
         steps: &[LoadStepConfig],
         server: HttpTestServer,
         warmup: &WarmupBuilder,
+        generator_count: u8,
+        virtual_user_count: u32,
     ) -> Self {
-        let total_requests = steps.iter().map(|step| step.count).sum();
+        let step_counts: Vec<u32> = steps.iter().map(|step| step.count).collect();
         Self {
-            total_requests,
+            total_requests: step_counts.iter().sum(),
+            step_counts,
+            generator_count,
+            virtual_user_count,
             user_specs,
             _server: server,
             warmup_duration: warmup.duration(),
             warmup_rate: warmup.rate(),
             warmup_pause: warmup.pause(),
             interval_count: steps.len(),
+            seed: 0,
+            inputs: Vec::new(),
         }
     }
 }
@@ -156,13 +174,34 @@ impl LoadTestBuilder {
         for _ in 0..count {
             generators.push(GeneratorInstance::spawn().await);
         }
-        let config = LoadTestConfig::new(user_specs, profile.steps(), server, &warmup);
+        let mut config = LoadTestConfig::new(
+            user_specs,
+            profile.steps(),
+            server,
+            &warmup,
+            count,
+            virtual_user_count,
+        );
+        config.seed = seed;
+        config.inputs = vec![
+            ("profile.csv", profile.to_csv()),
+            ("script.lua", script.build().to_string()),
+            ("registry.yaml", registry.to_yaml()),
+            ("warmup.yaml", warmup.to_yaml()),
+        ];
+        let input = |name| &config.inputs.iter().find(|(n, _)| *n == name).unwrap().1;
+        let (script, profile, warmup, registry) = (
+            write_to_file(input("script.lua")),
+            write_to_file(input("profile.csv")),
+            write_to_file(input("warmup.yaml")),
+            write_to_file(input("registry.yaml")),
+        );
 
         LoadTest {
-            script: write_to_file(&script.build()),
-            profile: write_to_file(&profile.to_csv()),
-            warmup: write_to_file(&warmup.to_yaml()),
-            registry: write_to_file(&registry.to_yaml()),
+            script,
+            profile,
+            warmup,
+            registry,
             generators,
             virtual_user_count,
             seed,

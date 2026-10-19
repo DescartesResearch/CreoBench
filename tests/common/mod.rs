@@ -16,6 +16,7 @@ mod orchestrator;
 
 pub mod prelude {
     pub use super::{
+        csv::{IntervalRow, TransactionRow},
         load_test::{LoadTest, LoadTestBuilder, LoadTestConfig, Spec},
         orchestrator::OutputDir,
     };

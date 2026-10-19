@@ -2,7 +2,7 @@ pub mod console;
 mod csv;
 pub mod interval;
 #[cfg(test)]
-mod test_utils;
+pub(crate) mod test_utils;
 pub mod transactions;
 pub use console::ConsolePersister;
 pub use interval::IntervalCsvPersister;
@@ -146,7 +146,7 @@ mod tests {
                 3,
                 1900,
                 target_secs * 1000,
-                DroppedCode::Error("batch behind, dropping".into()),
+                DroppedCode::Error("no free virtual user, dropping".into()),
             )]),
             None,
         )
@@ -315,7 +315,7 @@ mod tests {
              1,0.25,1,0,0,100,success,\n\
              1,0.5,1,1,1,200,failed,Status(503)\n\
              1,0.75,1,2,2,300,timeout,\"Error(\"\"deadline exceeded\"\")\"\n\
-             2,1.9,1,3,,,dropped,\"Error(\"\"batch behind, dropping\"\")\"\n"
+             2,1.9,1,3,,,dropped,\"Error(\"\"no free virtual user, dropping\"\")\"\n"
         );
         std::fs::remove_dir_all(&dir).unwrap();
     }

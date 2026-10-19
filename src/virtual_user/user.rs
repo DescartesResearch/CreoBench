@@ -45,7 +45,8 @@ struct Inner<T: HttpClient> {
 
 impl<S: UserState, T: HttpClient> VirtualUser<S, T> {
     /// Returns the virtual user ID.
-    pub fn id(&self) -> VirtualUserId {
+    #[cfg(test)]
+    pub(crate) fn id(&self) -> VirtualUserId {
         self.inner.id
     }
 }
@@ -106,7 +107,10 @@ fn fail_setup_with(id: SpecId, err: HttpExecuteError) -> UserError {
         }
         HttpExecuteError::Failed { message, .. } => UserError::Http(RequestError::Failed(message)),
         HttpExecuteError::Status { code, .. } => UserError::Status(code),
-        HttpExecuteError::Extract { source, .. } => UserError::Extract { id, source },
+        HttpExecuteError::Extract { source, .. } => UserError::Extract {
+            id,
+            source: *source,
+        },
     }
 }
 
@@ -139,22 +143,17 @@ impl<T: HttpClient + 'static + Clone> VirtualUser<Loop, T> {
             ..
         } = &mut *self.inner;
 
-        let elapsed = transaction.start_time().elapsed();
-        if !executor.timeout().is_zero() && elapsed > executor.timeout() {
-            return transaction.into_dropped(id, DroppedCode::WaitTimeTooLong(elapsed));
-        }
-
         let (revert_handle, spec_id, spec) = match runner.next_user_spec() {
             Ok(t) => t,
             Err(err) => {
-                return transaction.into_dropped(id, DroppedCode::Error(err.to_string()));
+                return transaction.into_dropped(Some(id), DroppedCode::Error(err.to_string()));
             }
         };
 
         let RequestSpec::Http(http_spec) = spec;
 
         match executor.execute(&http_spec, service_registry, runner).await {
-            Ok(service_time) => transaction.into_success(id, spec_id, service_time),
+            Ok(timing) => transaction.into_success(id, spec_id, timing),
             Err(err) => {
                 revert_handle.revert(runner);
                 map_execution_error(transaction, id, spec_id, err)
@@ -171,27 +170,19 @@ fn map_execution_error(
 ) -> TransactionResult {
     use HttpExecuteError::*;
     match err {
-        Timeout {
-            message,
-            service_time,
-        } => transaction.into_timeout(id, spec_id, service_time, TimeoutCode::Error(message)),
-        Failed {
-            message,
-            service_time,
-        } => transaction.into_failed(id, spec_id, service_time, FailedCode::Send(message)),
-        Status { code, service_time } => {
-            transaction.into_failed(id, spec_id, service_time, FailedCode::Status(code))
+        Timeout { message, timing } => {
+            transaction.into_timeout(id, spec_id, timing, TimeoutCode::Error(message))
         }
-        Extract {
-            source,
-            service_time,
-        } => transaction.into_failed(
-            id,
-            spec_id,
-            service_time,
-            FailedCode::Extract(source.to_string()),
-        ),
-        Url(url_err) => transaction.into_dropped(id, DroppedCode::Error(url_err.to_string())),
+        Failed { message, timing } => {
+            transaction.into_failed(id, spec_id, timing, FailedCode::Send(message))
+        }
+        Status { code, timing } => {
+            transaction.into_failed(id, spec_id, timing, FailedCode::Status(code))
+        }
+        Extract { source, timing } => {
+            transaction.into_failed(id, spec_id, timing, FailedCode::Extract(source.to_string()))
+        }
+        Url(url_err) => transaction.into_dropped(Some(id), DroppedCode::Error(url_err.to_string())),
     }
 }
 
@@ -220,7 +211,7 @@ pub enum UserError {
 mod tests {
     use super::*;
     use crate::http::HttpResponse;
-    use crate::load::{LoadTestTime, RelativeLoadTestTime, ResponseTime, StartTime};
+    use crate::load::{LoadTestTime, RelativeLoadTestTime, StartTime};
     use crate::script::HttpMethod;
     use crate::test_utils::prelude::*;
     use crate::transaction::{LoadGeneratorId, Transaction};
@@ -404,34 +395,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_next_request_drops_with_wait_time_too_long() {
-        let Scenario { pool, .. } = ScenarioBuilder::default()
-            .modify_client(|c| c.with_timeout_duration(Duration::from_millis(1)))
-            .build()
-            .await;
-        let user = pool.acquire().await;
-        let transaction = sample_transaction();
-
-        tokio::time::sleep(Duration::from_millis(5)).await;
-
-        let result = user.send_next_request(pool, transaction).await;
-
-        match result {
-            TransactionResult::Dropped {
-                metadata,
-                code,
-                response_time,
-            } => {
-                assert_matches!(code, DroppedCode::WaitTimeTooLong(_));
-                assert_eq!(metadata.virtual_user_id, VirtualUserId::new(0));
-                assert_eq!(metadata.loadgenerator_id, LoadGeneratorId::new(7));
-                assert!(response_time > ResponseTime::new(Duration::from_millis(5)));
-            }
-            other => panic!("expected Dropped, got {other:?}"),
-        }
-    }
-
-    #[tokio::test]
     async fn send_next_request_drops_on_script_errors() {
         let request =
             RequestBuilder::dynamic(r#"function(store) error("runner failure") end"#).build();
@@ -452,7 +415,7 @@ mod tests {
                     }
                     other => panic!("expected DroppedCode::Error, got {other:?}"),
                 }
-                assert_eq!(metadata.virtual_user_id, VirtualUserId::new(0));
+                assert_eq!(metadata.virtual_user_id, Some(VirtualUserId::new(0)));
                 assert_eq!(metadata.loadgenerator_id, LoadGeneratorId::new(7));
             }
             other => panic!("expected Dropped, got {other:?}"),

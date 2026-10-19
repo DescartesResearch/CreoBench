@@ -24,10 +24,10 @@ Lua, generate time-varying workloads from multiple load generators, and collect 
 per-transaction results for detailed analysis.
 
 - **Distributed execution** — generate load from multiple workers while orchestrating the test from a single process.
-- **Open-loop load generation** — generate requests from a specified arrival process, including exponentially
-  distributed inter-arrival times that approximate independent user or event arrivals. Because generation is decoupled
-  from response completion, system slowdowns do not reduce the offered load as they do in closed-loop tests, enabling
-  controlled measurements of throughput, queueing, saturation, and tail latency.
+- **Open-loop load generation** — generate requests as a Poisson process, with exponentially distributed inter-arrival
+  times that approximate independent user or event arrivals, dispatched with sub-millisecond precision. Because
+  generation is decoupled from response completion, system slowdowns do not reduce the offered load as they do in
+  closed-loop tests, enabling controlled measurements of throughput, queueing, saturation, and tail latency.
 - **Flexible Lua workloads** — model realistic user behavior in Lua, from simple request sequences to stateful users
   with branching logic, parameterization, and dynamically selected operations.
 - **Arbitrary load profiles** — generate workloads ranging from constant request rates to complex time-varying profiles
@@ -209,7 +209,7 @@ The optional warmup phase is configured in `examples/warmup.yaml`:
 ```yaml
 # The warmup phase runs before the main load test and is meant to let
 # the system under test stabilise. `pause` is the gap between warmup and load.
-rate: 1 # transactions per second
+rate: 1 # transactions per second, across all load generators
 duration: 5 # seconds
 pause: 2 # seconds
 ```
@@ -255,8 +255,8 @@ Use `--help` on either binary for the full list of options.
 
 ## Outputs
 
-By default, CreoBench writes two CSV files to `./results`. Use the
-`--output` option to specify a different output directory.
+By default, CreoBench writes two CSV files to `./results`, together with copies of the input files and a `run.json` with
+the run's metadata (see [Outputs](docs/outputs.md)). Use the `--output` option to specify a different output directory.
 
 ### `interval.csv`
 
@@ -264,42 +264,44 @@ By default, CreoBench writes two CSV files to `./results`. Use the
 
 | Column                    | Description                                                                                                   |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `target_time`             | Deadline, relative to the start of the load test, for sending all transactions in this load interval          |
-| `load_level`              | Configured target request rate for this interval                                                              |
+| `target_time`             | Deadline of this load interval, relative to the start of its phase                                            |
+| `load_level`              | Configured target transaction count for this interval; the actual count varies around it                      |
 | `successful_transactions` | Transactions that completed successfully during this interval                                                 |
 | `failed_transactions`     | Transactions that failed during this interval                                                                 |
 | `timeout_transactions`    | Transactions that exceeded the configured timeout during this interval                                        |
 | `dropped_transactions`    | Transactions that were never sent (e.g. due to VU pool exhaustion, or Lua script errors) during this interval |
 | `avg_service_time`        | Average service time in milliseconds of non-dropped transactions that finished during this interval           |
-| `final_batch_time`        | Time at which the final request batch was sent in this interval                                               |
+| `final_batch_time`        | Time at which the last transaction of this interval was dispatched; empty if it had none                      |
 | `phase`                   | Indicates the phase of the load interval: `warmup`, `pause`, or `load`                                        |
 
 The metrics in `interval.csv` group transactions by the interval in which they finished, not the interval in which they
 were sent. Consequently, a transaction sent during one interval may be included in the metrics for a later interval if
 it completes after the original interval has ended.
 
-A dropped transaction is one that was scheduled or started by the load generator but never sent to the system under
-test. Drops can occur when the generator cannot assign the transaction to an available virtual user, when workload
-execution fails before the request is sent, or when a scheduling delay means that the transaction can no longer be sent
-within its intended deadline. A high number of dropped transactions may indicate insufficient VU pool size or
-load-generator capacity rather than a failure in the system under test.
+A dropped transaction is one that was scheduled by the load generator but never sent to the system under test, because
+it could not be sent within 10 ms of its scheduled arrival: no virtual user became free in time (`NoVirtualUser`), or
+the load generator itself got to it too late (`Late`). Transactions are also dropped when the script fails before the
+request is sent (`Error`). Drops mean that the load generators did not deliver the scheduled load, so any drop in the
+load phase invalidates the run. At the end of a run, CreoBench summarizes all drops by reason and how to fix them.
 
 ### `transactions.csv`
 
 `transactions.csv` contains one row for every transaction, including transactions that were dropped before reaching the
-network. This can be used for detailed post-hoc analysis.
+network. This can be used for detailed post-hoc analysis. Times are relative to the start of the transaction's phase
+(warmup or load). Rows are not ordered by execution; sort by `start_time` or `send_time` where order matters.
 
-| Column              | Description                                                                                         |
-| ------------------- | --------------------------------------------------------------------------------------------------- |
-| `target_time`       | Deadline, relative to the start of the load test, for sending this transaction                      |
-| `start_time`        | Time at which the transaction was queued, relative to the start of the load test                    |
-| `load_generator_id` | Identifier of the load generator that sent the transaction                                          |
-| `virtual_user_id`   | Identifier of the virtual user that sent the transaction                                            |
-| `spec_id`           | Index of the request specification in the script's request table that was sent for this transaction |
-| `response_time_ms`  | End-to-end time in milliseconds including wait time                                                 |
-| `service_time_ms`   | Time in milliseconds the transaction waited for a server response                                   |
-| `outcome`           | Transaction outcome: `success`, `failed`, `timeout`, or `dropped`                                   |
-| `reason`            | Error classification for non-success outcomes; `null` for successful transactions                   |
+| Column              | Description                                                                                                  |
+| ------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `target_time`       | Deadline of the load interval this transaction was scheduled in                                              |
+| `start_time`        | Scheduled arrival time of the transaction                                                                    |
+| `send_time`         | Time at which the request was sent; empty for dropped transactions                                           |
+| `load_generator_id` | Identifier of the load generator that sent the transaction                                                   |
+| `virtual_user_id`   | Identifier of the virtual user that sent the transaction; empty if it was dropped before getting one         |
+| `spec_id`           | Index of the request specification in the script's request table that was sent for this transaction          |
+| `response_time_ms`  | Time in milliseconds from the scheduled arrival until the outcome, including any wait for a virtual user     |
+| `service_time_ms`   | Time in milliseconds from sending the request until its response                                             |
+| `outcome`           | Transaction outcome: `success`, `failed`, `timeout`, or `dropped`                                            |
+| `reason`            | Error classification for non-success outcomes, e.g. `NoVirtualUser` or `Late` for drops; empty for successes |
 
 ### Progress Output
 

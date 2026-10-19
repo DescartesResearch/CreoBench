@@ -37,7 +37,8 @@ where
         Self { addr, framed }
     }
 
-    pub fn addr(&self) -> &str {
+    #[cfg(test)]
+    pub(crate) fn addr(&self) -> &str {
         &self.addr
     }
 
@@ -87,13 +88,6 @@ mod tests {
     use super::*;
 
     type LoadGeneratorFramer = MessageFramer<GeneratorUpdate, Command>;
-
-    #[tokio::test]
-    async fn configured_new_stores_addr() {
-        let stream = tokio::io::duplex(1024).0;
-        let c = StartHandle::new("10.0.0.1:8080".to_string().into(), stream);
-        assert_eq!(c.addr(), "10.0.0.1:8080");
-    }
 
     #[tokio::test]
     async fn configured_start_sends_start_and_receives_reports_then_finished() {

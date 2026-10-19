@@ -23,15 +23,12 @@ pub trait HttpClient: Send + Sync {
         headers: impl IntoIterator<Item = &'a (String, String)> + Send + 'a,
         body: Option<&serde_json::Value>,
     ) -> impl Future<Output = Result<HttpResponse, RequestError>> + Send;
-
-    fn timeout(&self) -> std::time::Duration;
 }
 
 /// HttpClient implementation using [`reqwest::Client`].
 #[derive(Debug, Default, Clone)]
 pub struct ReqwestHttpClient {
     client: reqwest::Client,
-    timeout: std::time::Duration,
 }
 
 impl ReqwestHttpClient {
@@ -49,7 +46,6 @@ impl ReqwestHttpClient {
             client: builder
                 .build()
                 .map_err(|err| Error::Client(err.to_string()))?,
-            timeout,
         })
     }
 }
@@ -109,10 +105,6 @@ impl HttpClient for ReqwestHttpClient {
             headers: response_headers,
             body: response_body,
         })
-    }
-
-    fn timeout(&self) -> std::time::Duration {
-        self.timeout
     }
 }
 

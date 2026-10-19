@@ -28,9 +28,16 @@ pub enum TransactionResult {
     },
 }
 
+/// Why a transaction was dropped instead of sent.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DroppedCode {
-    WaitTimeTooLong(ResponseTime),
+    /// No virtual user became free in time to send the request on schedule,
+    /// so the virtual user pool is too small for the load.
+    NoVirtualUser,
+    /// A virtual user was free, but the load generator only got to the
+    /// request too late to send it on schedule, so it lacks resources.
+    Late,
+    /// The script failed before the request could be sent.
     Error(String),
 }
 
@@ -86,14 +93,16 @@ mod tests {
                 any::<u8>().prop_map(LoadGeneratorId::new),
                 relative_load_test_time_strategy(),
                 relative_load_test_time_strategy(),
+                relative_load_test_time_strategy(),
             )
                 .prop_map(
-                    |(spec_id, virtual_user_id, loadgenerator_id, start_time, target_time)| {
+                    |(spec_id, virtual_user_id, loadgenerator_id, start_time, send_time, target_time)| {
                         ResultMetadata {
                             spec_id,
                             virtual_user_id,
                             loadgenerator_id,
                             start_time,
+                            send_time,
                             target_time,
                         }
                     },
@@ -104,7 +113,7 @@ mod tests {
     proptest_strategy! {
         dropped_metadata_strategy: DroppedMetadata => {
             (
-                any::<u32>().prop_map(VirtualUserId::new),
+                proptest::option::of(any::<u32>().prop_map(VirtualUserId::new)),
                 any::<u8>().prop_map(LoadGeneratorId::new),
                 relative_load_test_time_strategy(),
                 relative_load_test_time_strategy(),
@@ -125,7 +134,8 @@ mod tests {
     proptest_strategy! {
         dropped_code_strategy: DroppedCode => {
             prop_oneof![
-                response_time_strategy().prop_map(DroppedCode::WaitTimeTooLong),
+                Just(DroppedCode::NoVirtualUser),
+                Just(DroppedCode::Late),
                 any::<String>().prop_map(DroppedCode::Error),
             ]
         }

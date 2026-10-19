@@ -21,17 +21,21 @@ pub fn stats_with_measured_transactions(
 ) -> IntervalStatistics {
     let tracker = Tracker::new();
     for (vu_id, rt) in success_ms.iter().enumerate() {
-        tracker.log_result(fresh_transaction().into_success(
+        let transaction = fresh_transaction();
+        let timing = transaction.sent_at_start(ServiceTime::new(Duration::from_millis(*rt)));
+        tracker.log_result(transaction.into_success(
             VirtualUserId::new(vu_id as u32),
             SpecId::new(0),
-            ServiceTime::new(Duration::from_millis(*rt)),
+            timing,
         ));
     }
     for (vu_id, rt) in failed_ms.iter().enumerate() {
-        tracker.log_result(fresh_transaction().into_failed(
+        let transaction = fresh_transaction();
+        let timing = transaction.sent_at_start(ServiceTime::new(Duration::from_millis(*rt)));
+        tracker.log_result(transaction.into_failed(
             VirtualUserId::new((success_ms.len() + vu_id) as u32),
             SpecId::new(0),
-            ServiceTime::new(Duration::from_millis(*rt)),
+            timing,
             FailedCode::Send("test".into()),
         ));
     }
@@ -53,11 +57,9 @@ pub fn success_result(
     target_ms: u64,
     response_ms: u64,
 ) -> TransactionResult {
-    transaction_starting_at(start_ms, target_ms).into_success(
-        VirtualUserId::new(vu_id),
-        SpecId::new(spec_id),
-        ServiceTime::new(Duration::from_millis(response_ms)),
-    )
+    let transaction = transaction_starting_at(start_ms, target_ms);
+    let timing = transaction.sent_at_start(ServiceTime::new(Duration::from_millis(response_ms)));
+    transaction.into_success(VirtualUserId::new(vu_id), SpecId::new(spec_id), timing)
 }
 
 pub fn failed_result(
@@ -68,10 +70,12 @@ pub fn failed_result(
     response_ms: u64,
     code: FailedCode,
 ) -> TransactionResult {
-    transaction_starting_at(start_ms, target_ms).into_failed(
+    let transaction = transaction_starting_at(start_ms, target_ms);
+    let timing = transaction.sent_at_start(ServiceTime::new(Duration::from_millis(response_ms)));
+    transaction.into_failed(
         VirtualUserId::new(vu_id),
         SpecId::new(spec_id),
-        ServiceTime::new(Duration::from_millis(response_ms)),
+        timing,
         code,
     )
 }
@@ -84,10 +88,12 @@ pub fn timeout_result(
     response_ms: u64,
     code: TimeoutCode,
 ) -> TransactionResult {
-    transaction_starting_at(start_ms, target_ms).into_timeout(
+    let transaction = transaction_starting_at(start_ms, target_ms);
+    let timing = transaction.sent_at_start(ServiceTime::new(Duration::from_millis(response_ms)));
+    transaction.into_timeout(
         VirtualUserId::new(vu_id),
         SpecId::new(spec_id),
-        ServiceTime::new(Duration::from_millis(response_ms)),
+        timing,
         code,
     )
 }
@@ -98,7 +104,7 @@ pub fn dropped_result(
     target_ms: u64,
     code: DroppedCode,
 ) -> TransactionResult {
-    transaction_starting_at(start_ms, target_ms).into_dropped(VirtualUserId::new(vu_id), code)
+    transaction_starting_at(start_ms, target_ms).into_dropped(Some(VirtualUserId::new(vu_id)), code)
 }
 
 pub fn stats_with(results: &[TransactionResult]) -> IntervalStatistics {

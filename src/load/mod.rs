@@ -1,11 +1,8 @@
-pub mod pacer;
-mod step;
+mod schedule;
 mod time;
 
-pub use pacer::LoadIntervalPacer;
-pub use step::LoadInterval;
+pub use schedule::{ArrivalSchedule, ScheduledStep};
 pub use time::{
-    DurationMeasurement, LoadStepDuration, LoadStepElapsed, LoadStepRemaining, LoadStepStart,
-    LoadTestTime, RelativeLoadTestTime, ResponseTime, ResponseTimeMarker, ServiceTime,
-    ServiceTimeMarker, ServiceTimeMeasurement, StartTime, WaitTime,
+    LoadTestTime, RelativeLoadTestTime, RequestTiming, ResponseTime, ServiceTime,
+    ServiceTimeMeasurement, StartTime, wait_until,
 };

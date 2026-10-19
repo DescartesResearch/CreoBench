@@ -21,13 +21,14 @@ overview of how the warmup phase fits into a load test.
 
 The warmup phase is configured in a YAML file with three fields:
 
-| Field      | Type | Description                                                          |
-| ---------- | ---- | -------------------------------------------------------------------- |
-| `rate`     | u32  | Target transactions per second during the warmup phase.              |
-| `duration` | u32  | Length of the warmup phase in seconds.                               |
-| `pause`    | u32  | Duration of the pause between the warmup and load phases in seconds. |
+| Field      | Type | Description                                                                                  |
+| ---------- | ---- | -------------------------------------------------------------------------------------------- |
+| `rate`     | u32  | Target transactions per second during the warmup phase, across all load generator instances. |
+| `duration` | u32  | Length of the warmup phase in seconds.                                                       |
+| `pause`    | u32  | Duration of the pause between the warmup and load phases in seconds.                         |
 
-The file must contain all three fields. For example:
+Like the [load profile](load-profiles.md), the rate describes the total load: the orchestrator divides it among the load
+generator instances. The file must contain all three fields. For example:
 
 ```yaml
 rate: 10
@@ -61,7 +62,10 @@ A warmup configuration creates three distinct periods in the load test:
    is sent. During this phase, the interval CSV includes rows with `phase=pause`
    and `load_level=0`. The pause allows the system to settle after the warmup
    traffic and allows transactions sent during the warmup phase to complete
-   before measurements begin.
+   before measurements begin. Warmup transactions that complete during the
+   pause are reported in its rows. If warmup transactions are still in flight
+   when the pause ends, CreoBench logs a warning, since they are then reported
+   in the load phase.
 
 3. **Load phase** — The main load test begins after the pause, using the
    profile you specified.

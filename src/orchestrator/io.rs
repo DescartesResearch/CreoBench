@@ -1,30 +1,75 @@
-use std::future::Future;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::config::FromBytes;
 
 use super::{ConfigError, OutputError};
 
-/// A type that can be loaded asynchronously from a file.
-pub trait FromFile: Sized {
-    fn from_file(
-        path: impl AsRef<Path> + Send,
-    ) -> impl Future<Output = Result<Self, ConfigError>> + Send;
+/// An input file of a load test, kept exactly as read.
+///
+/// Keeping the contents allows copying the input files to the output
+/// directory, so that every run records the configuration it used.
+#[derive(Debug, Clone)]
+pub struct InputFile {
+    pub path: PathBuf,
+    pub contents: Vec<u8>,
 }
 
-impl<T: FromBytes> FromFile for T {
-    async fn from_file(path: impl AsRef<Path> + Send) -> Result<Self, ConfigError> {
-        let path = path.as_ref();
-        let bytes = tokio::fs::read(path)
+impl InputFile {
+    pub async fn read(path: impl Into<PathBuf>) -> Result<Self, ConfigError> {
+        let path = path.into();
+        let contents = tokio::fs::read(&path)
             .await
             .map_err(|source| ConfigError::FileOpen {
-                path: path.to_path_buf(),
+                path: path.clone(),
                 source,
             })?;
-        T::from_bytes(&bytes).map_err(|source| ConfigError::ParseError {
-            path: path.to_path_buf(),
+        Ok(Self { path, contents })
+    }
+
+    pub fn parse<T: FromBytes>(&self) -> Result<T, ConfigError> {
+        T::from_bytes(&self.contents).map_err(|source| ConfigError::ParseError {
+            path: self.path.clone(),
             source,
         })
+    }
+}
+
+/// The input files of a load test.
+#[derive(Debug, Clone)]
+pub struct InputFiles {
+    pub profile: InputFile,
+    pub script: InputFile,
+    pub registry: InputFile,
+    pub warmup: InputFile,
+}
+
+impl InputFiles {
+    pub async fn read(
+        profile: impl Into<PathBuf>,
+        script: impl Into<PathBuf>,
+        registry: impl Into<PathBuf>,
+        warmup: impl Into<PathBuf>,
+    ) -> Result<Self, ConfigError> {
+        Ok(Self {
+            profile: InputFile::read(profile).await?,
+            script: InputFile::read(script).await?,
+            registry: InputFile::read(registry).await?,
+            warmup: InputFile::read(warmup).await?,
+        })
+    }
+
+    /// The input files with the names under which they are copied to the
+    /// output directory.
+    ///
+    /// These are the orchestrator's default input file names, so a run can be
+    /// repeated from its output directory without passing any input paths.
+    pub fn named(&self) -> [(&'static str, &InputFile); 4] {
+        [
+            ("profile.csv", &self.profile),
+            ("script.lua", &self.script),
+            ("registry.yaml", &self.registry),
+            ("warmup.yaml", &self.warmup),
+        ]
     }
 }
 
@@ -103,6 +148,14 @@ impl OutputDir {
     pub fn create_file(&self, name: &'static str) -> std::io::Result<std::fs::File> {
         let path = self.path.join(name);
         std::fs::File::create(&path)
+    }
+
+    /// Writes `contents` to a file with the given `name` relative to this directory.
+    pub async fn write_file(&self, name: &'static str, contents: &[u8]) -> Result<(), OutputError> {
+        let path = self.path.join(name);
+        tokio::fs::write(&path, contents)
+            .await
+            .map_err(|source| OutputError::WriteFile { path, source })
     }
 }
 
