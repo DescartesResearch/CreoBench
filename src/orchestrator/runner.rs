@@ -9,7 +9,7 @@ use crate::orchestrator::persist::{
 use crate::orchestrator::phases::collect::CollectError;
 use crate::orchestrator::phases::{ConnectHandle, GeneratorHandle, collect_reports};
 use crate::orchestrator::summary::DropSummary;
-use crate::orchestrator::{Error, Result, distribute_profile};
+use crate::orchestrator::{Error, Result, distribute_profile, distribute_warmup};
 use crate::tracker::IntervalReport;
 use crate::transaction::LoadGeneratorId;
 use crate::wire::command::Command;
@@ -46,6 +46,7 @@ impl LoadTestRunner {
             .map(LoadGeneratorId::new);
 
         let split_profiles = distribute_profile(&self.config.profile, self.handles.len());
+        let split_warmups = distribute_warmup(&self.config.warmup, self.handles.len());
 
         // Phase 1: connect all (collect all results)
         tracing::info!("Connecting to all load generator instances...");
@@ -91,15 +92,17 @@ impl LoadTestRunner {
         assert_eq!(connected.len(), split_profiles.len());
         tracing::info!("Sending load-generator configuration to load generator instances...");
         let mut tasks = Vec::with_capacity(connected.len());
-        for (id, (handle, profile)) in load_generator_ids
-            .into_iter()
-            .zip(connected.into_iter().zip(&split_profiles))
-        {
+        for (id, ((handle, profile), warmup)) in load_generator_ids.into_iter().zip(
+            connected
+                .into_iter()
+                .zip(&split_profiles)
+                .zip(split_warmups),
+        ) {
             let config_msg = ConfigMessage::Config(LoadGeneratorConfig {
                 profile: LoadProfile::from(profile.clone()),
                 script: Arc::clone(&self.config.script),
                 registry: ServiceRegistry::from(self.config.registry.clone()),
-                warmup: Warmup::from(self.config.warmup.clone()),
+                warmup: Warmup::from(warmup),
                 virtual_user_count: self.config.virtual_user_count,
                 seed: self.config.seed,
                 timeout_ms: self.config.timeout_ms,

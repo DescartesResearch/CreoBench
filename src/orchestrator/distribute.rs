@@ -1,4 +1,4 @@
-use crate::config::{LoadProfileConfig, LoadStepConfig};
+use crate::config::{LoadProfileConfig, LoadStepConfig, WarmupConfig};
 
 pub fn distribute_count(total: u32, divisor: usize) -> Vec<u32> {
     let base = total / divisor as u32;
@@ -34,6 +34,20 @@ pub fn distribute_profile(
     generator_steps
         .into_iter()
         .map(|steps| LoadProfileConfig { steps })
+        .collect()
+}
+
+/// Splits the warmup rate across `num_generators` load generators.
+///
+/// Like the load profile, the warmup rate describes the total load across all
+/// load generators. Duration and pause are the same for every generator.
+pub fn distribute_warmup(warmup: &WarmupConfig, num_generators: usize) -> Vec<WarmupConfig> {
+    distribute_count(warmup.rate, num_generators)
+        .into_iter()
+        .map(|rate| WarmupConfig {
+            rate,
+            ..warmup.clone()
+        })
         .collect()
 }
 
@@ -187,5 +201,20 @@ mod tests {
         assert_eq!(profiles.len(), 5);
         let sum: u32 = profiles.iter().map(|p| p.steps[0].count).sum();
         assert_eq!(sum, 3);
+    }
+
+    #[test]
+    fn distributes_warmup_rate_and_keeps_duration_and_pause() {
+        let warmup = WarmupConfig {
+            rate: 103,
+            duration: 30,
+            pause: 5,
+        };
+
+        let warmups = distribute_warmup(&warmup, 5);
+
+        let rates: Vec<_> = warmups.iter().map(|w| w.rate).collect();
+        assert_eq!(rates, [21, 21, 21, 20, 20]);
+        assert!(warmups.iter().all(|w| w.duration == 30 && w.pause == 5));
     }
 }

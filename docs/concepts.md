@@ -127,8 +127,9 @@ than cold-start effects. See [Warmup](warmup.md) for configuration details.
 
 At startup, the orchestrator distributes the test configuration -- such as the
 load profile, script, service registry, and warmup settings -- to the load
-generator instances. It also divides the load profile equally among the
-instances so that they can generate the required total load together.
+generator instances. It also divides the load profile and the warmup rate
+equally among the instances so that they can generate the required total
+load together.
 
 Each load generator instance then creates its virtual users and executes the
 setup transactions defined by the script. After completing setup, the

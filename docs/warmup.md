@@ -21,13 +21,14 @@ overview of how the warmup phase fits into a load test.
 
 The warmup phase is configured in a YAML file with three fields:
 
-| Field      | Type | Description                                                          |
-| ---------- | ---- | -------------------------------------------------------------------- |
-| `rate`     | u32  | Target transactions per second during the warmup phase.              |
-| `duration` | u32  | Length of the warmup phase in seconds.                               |
-| `pause`    | u32  | Duration of the pause between the warmup and load phases in seconds. |
+| Field      | Type | Description                                                                                  |
+| ---------- | ---- | -------------------------------------------------------------------------------------------- |
+| `rate`     | u32  | Target transactions per second during the warmup phase, across all load generator instances. |
+| `duration` | u32  | Length of the warmup phase in seconds.                                                       |
+| `pause`    | u32  | Duration of the pause between the warmup and load phases in seconds.                         |
 
-The file must contain all three fields. For example:
+Like the [load profile](load-profiles.md), the rate describes the total load: the orchestrator divides it among the load
+generator instances. The file must contain all three fields. For example:
 
 ```yaml
 rate: 10

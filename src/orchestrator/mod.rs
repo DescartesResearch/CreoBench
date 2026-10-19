@@ -8,7 +8,7 @@ pub mod runner;
 mod summary;
 
 pub use config::LoadTestConfig;
-pub use distribute::distribute_profile;
+pub use distribute::{distribute_profile, distribute_warmup};
 pub use error::{ConfigError, Error, OutputError, Result};
 
 use crate::cli::OrchestratorCli;

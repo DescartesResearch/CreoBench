@@ -209,7 +209,7 @@ The optional warmup phase is configured in `examples/warmup.yaml`:
 ```yaml
 # The warmup phase runs before the main load test and is meant to let
 # the system under test stabilise. `pause` is the gap between warmup and load.
-rate: 1 # transactions per second
+rate: 1 # transactions per second, across all load generators
 duration: 5 # seconds
 pause: 2 # seconds
 ```

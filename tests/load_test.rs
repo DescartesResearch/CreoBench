@@ -44,7 +44,7 @@ fn rows_of<'a>(intervals: &'a [IntervalRow], phase: &str) -> Vec<&'a IntervalRow
 
 /// Every phase reports one interval per second with the configured load level.
 fn assert_interval_structure(intervals: &[IntervalRow], config: &LoadTestConfig) {
-    let warmup_level = config.warmup_rate * u32::from(config.generator_count);
+    let warmup_level = config.warmup_rate;
     let warmup = rows_of(intervals, "warmup");
     assert_eq!(warmup.len() as u32, config.warmup_duration);
     for (second, row) in (1..).zip(&warmup) {
@@ -184,7 +184,7 @@ fn assert_virtual_users_alternate_requests(
 /// Arrivals are Poisson-distributed, so the number of transactions is random.
 /// It must lie within five standard deviations of its expected value.
 fn assert_arrival_count_matches_rate(transactions: &[TransactionRow], config: &LoadTestConfig) {
-    let warmup = config.warmup_duration * config.warmup_rate * u32::from(config.generator_count);
+    let warmup = config.warmup_duration * config.warmup_rate;
     let expected = f64::from(warmup + config.total_requests);
     let actual = transactions.len() as f64;
     assert!(
@@ -229,7 +229,7 @@ async fn load_test(count: u8) -> LoadTest {
     );
     let warmup = WarmupBuilder::default()
         .with_duration(2)
-        .with_rate(50)
+        .with_rate(count as u32 * 50)
         .with_pause(1);
     let registry = RegistryBuilder::default().with_service(SERVICE, builder.url());
 
