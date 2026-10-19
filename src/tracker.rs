@@ -323,27 +323,36 @@ mod tests {
     }
 
     fn success_result(virtual_user_id: u32, spec_id: usize, response_ms: u64) -> TransactionResult {
-        fresh_transaction().into_success(
+        let transaction = fresh_transaction();
+        let timing =
+            transaction.sent_at_start(ServiceTime::new(Duration::from_millis(response_ms)));
+        transaction.into_success(
             VirtualUserId::new(virtual_user_id),
             SpecId::new(spec_id),
-            ServiceTime::new(Duration::from_millis(response_ms)),
+            timing,
         )
     }
 
     fn failed_result(virtual_user_id: u32, spec_id: usize, response_ms: u64) -> TransactionResult {
-        fresh_transaction().into_failed(
+        let transaction = fresh_transaction();
+        let timing =
+            transaction.sent_at_start(ServiceTime::new(Duration::from_millis(response_ms)));
+        transaction.into_failed(
             VirtualUserId::new(virtual_user_id),
             SpecId::new(spec_id),
-            ServiceTime::new(Duration::from_millis(response_ms)),
+            timing,
             FailedCode::Send("test error reason".into()),
         )
     }
 
     fn timeout_result(virtual_user_id: u32, spec_id: usize, response_ms: u64) -> TransactionResult {
-        fresh_transaction().into_timeout(
+        let transaction = fresh_transaction();
+        let timing =
+            transaction.sent_at_start(ServiceTime::new(Duration::from_millis(response_ms)));
+        transaction.into_timeout(
             VirtualUserId::new(virtual_user_id),
             SpecId::new(spec_id),
-            ServiceTime::new(Duration::from_millis(response_ms)),
+            timing,
             TimeoutCode::Error("test timeout".into()),
         )
     }
@@ -636,11 +645,8 @@ mod tests {
             StartTime::now(time_zero),
             target_time,
         );
-        tracker.log_result(transaction.into_success(
-            VirtualUserId::new(0),
-            SpecId::new(0),
-            ServiceTime::new(Duration::from_millis(5)),
-        ));
+        let timing = transaction.sent_at_start(ServiceTime::new(Duration::from_millis(5)));
+        tracker.log_result(transaction.into_success(VirtualUserId::new(0), SpecId::new(0), timing));
 
         assert_eq!(
             tracker.inflight_count(),

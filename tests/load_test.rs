@@ -28,6 +28,7 @@ async fn run_load_test(count: u8) {
     assert_results_are_conserved(&intervals, &transactions);
     assert_transactions_succeed(&transactions);
     assert_transactions_start_within_their_step(&transactions);
+    assert_transactions_are_sent_after_their_start(&transactions);
     assert_every_generator_and_virtual_user_participates(&transactions, &config);
     assert_virtual_users_alternate_requests(&transactions);
     assert_arrival_count_matches_rate(&transactions, &config);
@@ -102,6 +103,20 @@ fn assert_transactions_start_within_their_step(transactions: &[TransactionRow]) 
     for row in transactions {
         assert!(
             row.target_time - 1.0 <= row.start_time && row.start_time < row.target_time,
+            "{row:?}"
+        );
+    }
+}
+
+/// A request is sent no earlier than its scheduled start, and no later than
+/// its start plus its response time, which spans from start to completion.
+fn assert_transactions_are_sent_after_their_start(transactions: &[TransactionRow]) {
+    for row in transactions {
+        let send_time = row.send_time.expect("successful transactions are sent");
+        // Response times are whole milliseconds, so allow for rounding.
+        let latest = row.start_time + (row.response_time_ms.unwrap() + 1) as f64 / 1000.0;
+        assert!(
+            row.start_time <= send_time && send_time <= latest,
             "{row:?}"
         );
     }

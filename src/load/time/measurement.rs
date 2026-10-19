@@ -37,6 +37,14 @@ impl StartTime {
         self.relative_to_start
     }
 
+    /// Returns `instant` relative to the start of the load test.
+    ///
+    /// Instants before this start time are clamped to it.
+    pub fn relative_to_start_of(&self, instant: Instant) -> RelativeLoadTestTime {
+        let since_start = instant.saturating_duration_since(self.instant.into());
+        RelativeLoadTestTime::new(self.relative_to_start.as_duration() + since_start)
+    }
+
     #[cfg(test)]
     pub(crate) fn from_relative(relative_to_start: RelativeLoadTestTime) -> Self {
         Self {
@@ -56,6 +64,36 @@ impl ServiceTimeMeasurement {
 
     pub fn elapsed(&self) -> ServiceTime {
         ServiceTime::new(self.0.elapsed())
+    }
+
+    /// Ends the measurement, keeping when the request was sent.
+    pub fn finish(self) -> RequestTiming {
+        RequestTiming {
+            sent_at: self.0,
+            service_time: self.elapsed(),
+        }
+    }
+}
+
+/// When a request was sent and how long it took to receive its response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RequestTiming {
+    pub sent_at: Instant,
+    pub service_time: ServiceTime,
+}
+
+impl RequestTiming {
+    /// A timing for a request sent `delay` after `start_time`.
+    #[cfg(test)]
+    pub(crate) fn sent_after(
+        start_time: StartTime,
+        delay: Duration,
+        service_time: ServiceTime,
+    ) -> Self {
+        Self {
+            sent_at: Instant::from(start_time.instant) + delay,
+            service_time,
+        }
     }
 }
 
@@ -110,6 +148,42 @@ mod tests {
         );
 
         assert!(start_time.elapsed() >= Duration::from_millis(15));
+    }
+
+    #[test]
+    fn relative_to_start_of_adds_time_since_start() {
+        let time_zero = LoadTestTime::now();
+        let start_time = StartTime::scheduled(
+            time_zero,
+            RelativeLoadTestTime::new(Duration::from_millis(5)),
+        );
+        let instant = Instant::from(time_zero) + Duration::from_millis(8);
+
+        assert_eq!(
+            start_time.relative_to_start_of(instant),
+            RelativeLoadTestTime::new(Duration::from_millis(8))
+        );
+    }
+
+    #[test]
+    fn relative_to_start_of_clamps_instants_before_start() {
+        let time_zero = LoadTestTime::now();
+        let offset = RelativeLoadTestTime::new(Duration::from_millis(5));
+        let start_time = StartTime::scheduled(time_zero, offset);
+
+        assert_eq!(start_time.relative_to_start_of(time_zero.into()), offset);
+    }
+
+    #[test]
+    fn finish_keeps_send_instant() {
+        let before = Instant::now();
+        let measurement = ServiceTimeMeasurement::now();
+        std::thread::sleep(Duration::from_millis(2));
+
+        let timing = measurement.finish();
+
+        assert!(timing.sent_at >= before);
+        assert!(timing.service_time.as_duration() >= Duration::from_millis(2));
     }
 
     #[tokio::test(start_paused = true)]

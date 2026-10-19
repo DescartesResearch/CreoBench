@@ -21,6 +21,7 @@ pub struct IntervalRow {
 pub struct TransactionRow {
     pub target_time: f64,
     pub start_time: f64,
+    pub send_time: Option<f64>,
     pub load_generator_id: u8,
     pub virtual_user_id: u32,
     pub spec_id: Option<u32>,

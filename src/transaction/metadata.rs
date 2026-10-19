@@ -23,5 +23,7 @@ pub struct ResultMetadata {
     pub virtual_user_id: VirtualUserId,
     pub loadgenerator_id: LoadGeneratorId,
     pub start_time: RelativeLoadTestTime,
+    /// When the request was sent, relative to the start of the load test.
+    pub send_time: RelativeLoadTestTime,
     pub target_time: RelativeLoadTestTime,
 }

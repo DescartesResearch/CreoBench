@@ -9,7 +9,7 @@ mod wait_until;
 
 pub use elapsed::{LoadStepElapsed, LoadStepStart};
 pub use load_test_time::{LoadTestTime, RelativeLoadTestTime};
-pub use measurement::{ServiceTimeMeasurement, StartTime};
+pub use measurement::{RequestTiming, ServiceTimeMeasurement, StartTime};
 pub use metric_duration::{
     DurationMeasurement, ResponseTime, ResponseTimeMarker, ServiceTime, ServiceTimeMarker,
 };

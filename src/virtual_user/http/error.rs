@@ -1,4 +1,4 @@
-use crate::load::ServiceTime;
+use crate::load::RequestTiming;
 use crate::script;
 
 /// Errors that can occur while resolving a request URL against the
@@ -29,28 +29,25 @@ pub enum HttpExecuteError {
     #[error("HTTP request timed out: {message}")]
     Timeout {
         message: String,
-        service_time: ServiceTime,
+        timing: RequestTiming,
     },
 
     /// The HTTP request failed
     #[error("HTTP request failed: {message}")]
     Failed {
         message: String,
-        service_time: ServiceTime,
+        timing: RequestTiming,
     },
 
     /// The HTTP response contained a non-successful status code
     #[error("response contains non-successful status `{code}`")]
-    Status {
-        code: u16,
-        service_time: ServiceTime,
-    },
+    Status { code: u16, timing: RequestTiming },
 
     /// The [`ScriptRunner::run_http_extract`][`script::ScriptRunner::run_http_extract`]
     /// returned an error
     #[error("failed to script extract function: {source}")]
     Extract {
-        source: script::Error,
-        service_time: ServiceTime,
+        source: Box<script::Error>,
+        timing: RequestTiming,
     },
 }

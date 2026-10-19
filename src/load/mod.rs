@@ -8,6 +8,6 @@ pub use schedule::{Arrival, ArrivalSchedule, ScheduledStep};
 pub use step::LoadInterval;
 pub use time::{
     DurationMeasurement, LoadStepDuration, LoadStepElapsed, LoadStepRemaining, LoadStepStart,
-    LoadTestTime, RelativeLoadTestTime, ResponseTime, ResponseTimeMarker, ServiceTime,
-    ServiceTimeMarker, ServiceTimeMeasurement, StartTime, WaitTime, wait_until,
+    LoadTestTime, RelativeLoadTestTime, RequestTiming, ResponseTime, ResponseTimeMarker,
+    ServiceTime, ServiceTimeMarker, ServiceTimeMeasurement, StartTime, WaitTime, wait_until,
 };

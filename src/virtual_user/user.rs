@@ -106,7 +106,10 @@ fn fail_setup_with(id: SpecId, err: HttpExecuteError) -> UserError {
         }
         HttpExecuteError::Failed { message, .. } => UserError::Http(RequestError::Failed(message)),
         HttpExecuteError::Status { code, .. } => UserError::Status(code),
-        HttpExecuteError::Extract { source, .. } => UserError::Extract { id, source },
+        HttpExecuteError::Extract { source, .. } => UserError::Extract {
+            id,
+            source: *source,
+        },
     }
 }
 
@@ -154,7 +157,7 @@ impl<T: HttpClient + 'static + Clone> VirtualUser<Loop, T> {
         let RequestSpec::Http(http_spec) = spec;
 
         match executor.execute(&http_spec, service_registry, runner).await {
-            Ok(service_time) => transaction.into_success(id, spec_id, service_time),
+            Ok(timing) => transaction.into_success(id, spec_id, timing),
             Err(err) => {
                 revert_handle.revert(runner);
                 map_execution_error(transaction, id, spec_id, err)
@@ -171,26 +174,18 @@ fn map_execution_error(
 ) -> TransactionResult {
     use HttpExecuteError::*;
     match err {
-        Timeout {
-            message,
-            service_time,
-        } => transaction.into_timeout(id, spec_id, service_time, TimeoutCode::Error(message)),
-        Failed {
-            message,
-            service_time,
-        } => transaction.into_failed(id, spec_id, service_time, FailedCode::Send(message)),
-        Status { code, service_time } => {
-            transaction.into_failed(id, spec_id, service_time, FailedCode::Status(code))
+        Timeout { message, timing } => {
+            transaction.into_timeout(id, spec_id, timing, TimeoutCode::Error(message))
         }
-        Extract {
-            source,
-            service_time,
-        } => transaction.into_failed(
-            id,
-            spec_id,
-            service_time,
-            FailedCode::Extract(source.to_string()),
-        ),
+        Failed { message, timing } => {
+            transaction.into_failed(id, spec_id, timing, FailedCode::Send(message))
+        }
+        Status { code, timing } => {
+            transaction.into_failed(id, spec_id, timing, FailedCode::Status(code))
+        }
+        Extract { source, timing } => {
+            transaction.into_failed(id, spec_id, timing, FailedCode::Extract(source.to_string()))
+        }
         Url(url_err) => transaction.into_dropped(id, DroppedCode::Error(url_err.to_string())),
     }
 }

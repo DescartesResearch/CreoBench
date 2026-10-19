@@ -86,14 +86,16 @@ mod tests {
                 any::<u8>().prop_map(LoadGeneratorId::new),
                 relative_load_test_time_strategy(),
                 relative_load_test_time_strategy(),
+                relative_load_test_time_strategy(),
             )
                 .prop_map(
-                    |(spec_id, virtual_user_id, loadgenerator_id, start_time, target_time)| {
+                    |(spec_id, virtual_user_id, loadgenerator_id, start_time, send_time, target_time)| {
                         ResultMetadata {
                             spec_id,
                             virtual_user_id,
                             loadgenerator_id,
                             start_time,
+                            send_time,
                             target_time,
                         }
                     },
