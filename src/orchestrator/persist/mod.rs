@@ -2,7 +2,7 @@ pub mod console;
 mod csv;
 pub mod interval;
 #[cfg(test)]
-mod test_utils;
+pub(crate) mod test_utils;
 pub mod transactions;
 pub use console::ConsolePersister;
 pub use interval::IntervalCsvPersister;

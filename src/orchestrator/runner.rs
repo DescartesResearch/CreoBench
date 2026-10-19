@@ -8,6 +8,7 @@ use crate::orchestrator::persist::{
 };
 use crate::orchestrator::phases::collect::CollectError;
 use crate::orchestrator::phases::{ConnectHandle, GeneratorHandle, collect_reports};
+use crate::orchestrator::summary::DropSummary;
 use crate::orchestrator::{Error, Result, distribute_profile};
 use crate::tracker::IntervalReport;
 use crate::transaction::LoadGeneratorId;
@@ -179,7 +180,9 @@ impl LoadTestRunner {
             error_tx,
         ));
 
-        let collect_outcome = collect_and_persist(&mut handles, &report_tx, &mut error_rx).await;
+        let mut summary = DropSummary::new(self.config.warmup.duration, self.config.warmup.pause);
+        let collect_outcome =
+            collect_and_persist(&mut handles, &report_tx, &mut error_rx, &mut summary).await;
         drop(report_tx);
         writer_task.await.expect("writer task panicked");
 
@@ -188,6 +191,7 @@ impl LoadTestRunner {
                 Ok(err) => Err(Error::Persist(err)),
                 Err(_) => {
                     tracing::info!("Load test finished.");
+                    summary.log();
                     Ok(())
                 }
             },
@@ -249,11 +253,13 @@ async fn collect_and_persist(
     handles: &mut Vec<GeneratorHandle>,
     report_tx: &tokio::sync::mpsc::Sender<IntervalReport>,
     error_rx: &mut tokio::sync::oneshot::Receiver<PersistError>,
+    summary: &mut DropSummary,
 ) -> CollectOutcome {
     loop {
         tokio::select! {
             outcome = collect_reports(handles) => match outcome {
                 Ok(Some(report)) => {
+                    summary.record(&report);
                     if report_tx.send(report).await.is_err() {
                         break CollectOutcome::PersistFailed(
                             error_rx.try_recv().expect(

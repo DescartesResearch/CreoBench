@@ -5,6 +5,7 @@ pub mod io;
 pub mod persist;
 pub mod phases;
 pub mod runner;
+mod summary;
 
 pub use config::LoadTestConfig;
 pub use distribute::distribute_profile;
