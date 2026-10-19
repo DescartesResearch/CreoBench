@@ -33,6 +33,12 @@ impl LoadTestTime {
     }
 }
 
+impl From<LoadTestTime> for Instant {
+    fn from(value: LoadTestTime) -> Self {
+        value.0
+    }
+}
+
 impl Add<LoadStepDeadline> for LoadTestTime {
     type Output = Self;
 

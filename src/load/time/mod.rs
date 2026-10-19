@@ -5,6 +5,7 @@ mod metric_duration;
 mod remaining;
 mod step;
 mod wait;
+mod wait_until;
 
 pub use elapsed::{LoadStepElapsed, LoadStepStart};
 pub use load_test_time::{LoadTestTime, RelativeLoadTestTime};
@@ -15,3 +16,4 @@ pub use metric_duration::{
 pub use remaining::LoadStepRemaining;
 pub use step::LoadStepDuration;
 pub use wait::WaitTime;
+pub use wait_until::wait_until;

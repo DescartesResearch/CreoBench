@@ -9,5 +9,5 @@ pub use step::LoadInterval;
 pub use time::{
     DurationMeasurement, LoadStepDuration, LoadStepElapsed, LoadStepRemaining, LoadStepStart,
     LoadTestTime, RelativeLoadTestTime, ResponseTime, ResponseTimeMarker, ServiceTime,
-    ServiceTimeMarker, ServiceTimeMeasurement, StartTime, WaitTime,
+    ServiceTimeMarker, ServiceTimeMeasurement, StartTime, WaitTime, wait_until,
 };
