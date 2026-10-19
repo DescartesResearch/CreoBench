@@ -141,19 +141,28 @@ continuously checks that the instances remain synchronized. If an instance
 falls out of sync, the orchestrator aborts the load test.
 
 During each load interval, a load generator instance uses its assigned
-portion of the load profile to determine how many transactions to send
-before the interval's deadline. It spreads those transactions across the
-interval to maintain the target rate. Transactions are grouped into
-**batches**, which are small groups of transactions scheduled to start
-at approximately the same time. Between batches, the load generator waits
-briefly before scheduling the next group.
+portion of the load profile as a target rate: the interval's transaction
+count divided by its duration. Transactions arrive as a **Poisson
+process** at that rate, so the time between two consecutive transactions
+is exponentially distributed and independent of all others. The number of
+transactions in an interval therefore varies around its target count. Since
+each instance generates an independent Poisson process, the transactions of
+all instances together again form a Poisson process at the total rate.
 
-Each transaction in a batch is assigned to an available virtual user. The
-virtual user runs the next step in its script, sends the corresponding HTTP
-request, and passes the response back to the script. CreoBench records the
-outcome of every transaction, including transactions that fail, time out,
-or cannot be sent—for example, because the load generator is too busy to
-schedule them in time.
+A dedicated pacing thread dispatches each transaction at its scheduled
+arrival time. It sleeps until shortly before an arrival and busy-waits for
+the last millisecond, which keeps dispatching precise to a few microseconds
+even at tens of thousands of transactions per second. Each transaction
+records its scheduled arrival as its start time, so any delay in sending it
+is included in its response time.
+
+Each transaction is assigned to an available virtual user. If all virtual
+users are busy, the transaction waits for the next free one. The virtual
+user runs the next step in its script, sends the corresponding HTTP request,
+and passes the response back to the script. CreoBench records the outcome of
+every transaction, including transactions that fail, time out, or are
+dropped because they waited longer than the timeout for a free virtual
+user.
 
 ---
 

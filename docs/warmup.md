@@ -61,7 +61,10 @@ A warmup configuration creates three distinct periods in the load test:
    is sent. During this phase, the interval CSV includes rows with `phase=pause`
    and `load_level=0`. The pause allows the system to settle after the warmup
    traffic and allows transactions sent during the warmup phase to complete
-   before measurements begin.
+   before measurements begin. Warmup transactions that complete during the
+   pause are reported in its rows. If warmup transactions are still in flight
+   when the pause ends, CreoBench logs a warning, since they are then reported
+   in the load phase.
 
 3. **Load phase** — The main load test begins after the pause, using the
    profile you specified.

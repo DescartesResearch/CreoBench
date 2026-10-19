@@ -9,6 +9,7 @@ If you are new to CreoBench, start with [Concepts](concepts.md) for an overview 
 ## Table of Contents
 
 - [Virtual User Count Sizing](#virtual-user-count-sizing)
+- [Load Generator Resources](#load-generator-resources)
 - [Profile Design](#profile-design)
 - [Choosing Warmup Values](#choosing-warmup-values)
 
@@ -41,8 +42,9 @@ where:
 
 For instance, if your load profile sends a maximum of $200$ transactions per second and the expected service time is
 $250ms$, then you would need $200 \times 0.25 = 50$ virtual users in the pool. This calculation assumes perfect
-conditions. In practice, configure additional virtual users as headroom for service time variation and delays introduced
-by the load generator instance. For example a pool of about 60 virtual users may be a reasonable starting point for this
+conditions. In practice, configure additional virtual users as headroom for service time variation, for short bursts
+above the average rate (arrivals are random, see [Load profiles](load-profiles.md)), and for delays introduced by the
+load generator instance. For example a pool of about 60 virtual users may be a reasonable starting point for this
 workload. Remember: The VU count is per instance, so running this load across two machines would only require 30 VUs
 per load generator instance.
 
@@ -51,6 +53,21 @@ When the RT of a transaction is substantially higher than its ST, the transactio
 waiting for a free virtual user in the VU pool. However, a bottleneck on the load generator machine, such as CPU, memory,
 or network saturation, can also cause a large gap between ST and RT. Thus, a large gap does not necessarily indicate an
 undersized VU pool, but may imply the load generator machine's resources are insufficient for the target load.
+
+---
+
+## Load Generator Resources
+
+Each load generator instance reserves one CPU core for pacing. A dedicated thread dispatches every transaction at its
+scheduled arrival time and busy-waits for the last millisecond before each arrival, so this core is fully busy at rates
+of a few thousand transactions per second and above. The remaining cores execute requests. Run each instance on a
+machine with at least two cores; with a single core, pacing competes with request execution and CreoBench logs a
+warning. If the cores of one machine are not sufficient for the target load, split the load across multiple load
+generator instances or lower it.
+
+To check whether a load generator keeps up, compare `send_time` and `start_time` in the
+[transaction CSV](outputs.md#transaction-csv). Their difference is the time a transaction spent in the load generator
+before its request was sent, including any wait for a free virtual user.
 
 ---
 
@@ -90,7 +107,8 @@ increase the duration so that the system still has enough time to become ready.
 
 After the warmup, set `pause` long enough for all in-flight warmup requests to finish, with some additional headroom for
 the system to settle. As a rule of thumb, choose a pause that is slightly longer than the configured transaction
-timeout.
+timeout. If warmup transactions are still in flight when the pause ends, CreoBench logs a warning, since they still
+occupy virtual users and are reported in the load phase.
 
 ---
 
