@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::orchestrator::config::LoadTestConfig;
 use crate::orchestrator::io::OutputDir;
+use crate::orchestrator::metadata::{self, GeneratorMetadata, RunMetadata};
 use crate::orchestrator::persist::{
     ConsolePersister, IntervalCsvPersister, PersistError, Persister, PhaseClassifier,
     TransactionCsvPersister, interval, transactions, writer_loop,
@@ -32,11 +33,15 @@ impl LoadTestRunner {
     }
 
     pub async fn run(self) -> Result<()> {
+        let started_at = metadata::now();
         let output_dir = OutputDir::new(
             self.config.output_dir.clone(),
             self.config.overwrite_outputs,
         )
         .await?;
+        for (name, input) in self.config.inputs.named() {
+            output_dir.write_file(name, &input.contents).await?;
+        }
 
         let load_generator_ids = (0..self.handles.len())
             .map(u8::try_from)
@@ -108,21 +113,22 @@ impl LoadTestRunner {
                 timeout_ms: self.config.timeout_ms,
                 load_generator_id: id,
             });
-            tasks.push(tokio::spawn(
-                async move { handle.configure(&config_msg).await },
-            ));
+            let task = tokio::spawn(async move { handle.configure(&config_msg).await });
+            tasks.push((id, task));
         }
 
         let mut configured = Vec::with_capacity(tasks.len());
+        let mut generators = Vec::with_capacity(tasks.len());
         let mut all_ready = true;
-        for (id, task) in tasks.into_iter().enumerate() {
+        for (id, task) in tasks {
             match task.await.expect("task panicked") {
-                Ok(start_handle) => {
-                    tracing::debug!("Loadgenerator `{}` is ready.", id);
+                Ok((start_handle, info)) => {
+                    tracing::debug!("Loadgenerator `{}` is ready.", id.get());
                     configured.push(start_handle);
+                    generators.push(GeneratorMetadata { id: id.get(), info });
                 }
                 Err(err) => {
-                    tracing::error!("Failed to setup Loadgenerator `{}`: {}", id, err);
+                    tracing::error!("Failed to setup Loadgenerator `{}`: {}", id.get(), err);
                     all_ready = false;
                 }
             }
@@ -195,6 +201,20 @@ impl LoadTestRunner {
                 Err(_) => {
                     tracing::info!("Load test finished.");
                     summary.log();
+                    let metadata = RunMetadata {
+                        version: env!("CARGO_PKG_VERSION"),
+                        started_at,
+                        finished_at: metadata::now(),
+                        valid: summary.is_valid(),
+                        virtual_user_count: self.config.virtual_user_count,
+                        timeout_ms: Some(self.config.timeout_ms).filter(|&ms| ms > 0),
+                        seed: self.config.seed,
+                        generators,
+                        drops: summary.report(),
+                    };
+                    let json = serde_json::to_vec_pretty(&metadata)
+                        .expect("run metadata serializes to JSON");
+                    output_dir.write_file(metadata::FILE_NAME, &json).await?;
                     Ok(())
                 }
             },

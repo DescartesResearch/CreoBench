@@ -1,5 +1,7 @@
 use std::num::NonZeroUsize;
 
+use crate::wire::configure::GeneratorInfo;
+
 /// Builds the async runtime of the load generator.
 ///
 /// One of the available cores is left to the pacer, which busy-waits on a
@@ -11,6 +13,20 @@ pub fn build() -> std::io::Result<tokio::runtime::Runtime> {
         .worker_threads(worker_threads(available_cores()))
         .enable_all()
         .build()
+}
+
+/// Details about this load generator to report to the orchestrator.
+///
+/// Must be called from within the load generator's runtime.
+pub fn generator_info() -> GeneratorInfo {
+    GeneratorInfo {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        cores: u32::try_from(available_cores().get()).unwrap_or(u32::MAX),
+        worker_threads: u32::try_from(tokio::runtime::Handle::current().metrics().num_workers())
+            .unwrap_or(u32::MAX),
+    }
 }
 
 /// Number of cores this process may run on.

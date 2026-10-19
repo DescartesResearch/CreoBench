@@ -2,6 +2,7 @@ pub mod config;
 mod distribute;
 mod error;
 pub mod io;
+pub mod metadata;
 pub mod persist;
 pub mod phases;
 pub mod runner;

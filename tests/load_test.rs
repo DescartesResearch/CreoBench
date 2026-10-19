@@ -32,6 +32,8 @@ async fn run_load_test(count: u8) {
     assert_every_generator_and_virtual_user_participates(&transactions, &config);
     assert_virtual_users_alternate_requests(&intervals, &transactions);
     assert_arrival_count_matches_rate(&transactions, &config);
+    assert_inputs_are_copied(&output, &config);
+    assert_run_metadata_describes_the_run(&output, &config);
 
     for generator in generators {
         generator.join().await.unwrap();
@@ -179,6 +181,34 @@ fn assert_virtual_users_alternate_requests(
             }
         }
     }
+}
+
+/// The output directory contains the input files, byte for byte.
+fn assert_inputs_are_copied(output: &OutputDir, config: &LoadTestConfig) {
+    for (name, contents) in &config.inputs {
+        let copy = std::fs::read_to_string(output.path().join(name)).unwrap();
+        assert_eq!(&copy, contents, "{name}");
+    }
+}
+
+fn assert_run_metadata_describes_the_run(output: &OutputDir, config: &LoadTestConfig) {
+    let json = std::fs::read(output.path().join("run.json")).unwrap();
+    let run: serde_json::Value = serde_json::from_slice(&json).unwrap();
+
+    assert_eq!(run["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(run["valid"], true);
+    assert_eq!(run["virtual_user_count"], config.virtual_user_count);
+    assert_eq!(run["seed"], config.seed);
+    let generators = run["generators"].as_array().unwrap();
+    assert_eq!(generators.len(), usize::from(config.generator_count));
+    for (id, generator) in generators.iter().enumerate() {
+        assert_eq!(generator["id"], id);
+        assert_eq!(generator["version"], env!("CARGO_PKG_VERSION"));
+        assert!(generator["cores"].as_u64().unwrap() >= 1);
+        assert!(generator["worker_threads"].as_u64().unwrap() >= 1);
+    }
+
+    assert!(run.get("drops").is_none(), "{run}");
 }
 
 /// Arrivals are Poisson-distributed, so the number of transactions is random.

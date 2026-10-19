@@ -4,7 +4,7 @@ use crate::cli::{GeneratorAddr, OrchestratorCli};
 use crate::config::{LoadProfileConfig, ServiceRegistryConfig, WarmupConfig};
 
 use super::Error;
-use super::io::FromFile;
+use super::io::InputFiles;
 
 #[derive(Debug, Clone)]
 pub struct LoadTestConfig {
@@ -12,6 +12,8 @@ pub struct LoadTestConfig {
     pub script: Arc<str>,
     pub registry: ServiceRegistryConfig,
     pub warmup: WarmupConfig,
+    /// The input files the configuration was read from.
+    pub inputs: InputFiles,
     pub generators: Vec<GeneratorAddr>,
     pub output_dir: std::path::PathBuf,
     pub virtual_user_count: u32,
@@ -26,23 +28,20 @@ impl LoadTestConfig {
             return Err(Error::LoadGeneratorOverflow(cli.generators.len()));
         }
 
-        let profile =
-            LoadProfileConfig::from_file(cli.profile.unwrap_or_else(|| "profile.csv".into()))
-                .await?;
-        let script =
-            Arc::<str>::from_file(cli.script.unwrap_or_else(|| "script.lua".into())).await?;
-        let registry = ServiceRegistryConfig::from_file(
+        let inputs = InputFiles::read(
+            cli.profile.unwrap_or_else(|| "profile.csv".into()),
+            cli.script.unwrap_or_else(|| "script.lua".into()),
             cli.registry.unwrap_or_else(|| "registry.yaml".into()),
+            cli.warmup.unwrap_or_else(|| "warmup.yaml".into()),
         )
         .await?;
-        let warmup =
-            WarmupConfig::from_file(cli.warmup.unwrap_or_else(|| "warmup.yaml".into())).await?;
 
         Ok(LoadTestConfig {
-            profile,
-            script,
-            registry,
-            warmup,
+            profile: inputs.profile.parse::<LoadProfileConfig>()?,
+            script: inputs.script.parse::<Arc<str>>()?,
+            registry: inputs.registry.parse::<ServiceRegistryConfig>()?,
+            warmup: inputs.warmup.parse::<WarmupConfig>()?,
+            inputs,
             generators: cli.generators,
             output_dir: cli.output.unwrap_or_else(|| "./results".into()),
             virtual_user_count: cli.virtual_user_count.unwrap_or(100),

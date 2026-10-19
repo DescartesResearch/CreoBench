@@ -8,7 +8,7 @@ use tempfile::{NamedTempFile, TempDir};
 use creo_bench::cli::GeneratorAddr;
 use creo_bench::config::{LoadProfileConfig, ServiceRegistryConfig, WarmupConfig};
 use creo_bench::orchestrator::config::LoadTestConfig;
-use creo_bench::orchestrator::io::FromFile;
+use creo_bench::orchestrator::io::InputFiles;
 use creo_bench::orchestrator::runner::LoadTestRunner;
 use creo_bench::orchestrator::{self, Error};
 
@@ -70,18 +70,21 @@ impl Orchestrator {
 
     /// Start the load test.
     pub async fn start(self) -> LoadTestResult {
-        let profile = LoadProfileConfig::from_file(&self.profile).await.unwrap();
-        let script = Arc::<str>::from_file(&self.script).await.unwrap();
-        let warmup = WarmupConfig::from_file(&self.warmup).await.unwrap();
-        let registry = ServiceRegistryConfig::from_file(&self.registry)
-            .await
-            .unwrap();
+        let inputs = InputFiles::read(
+            self.profile.path(),
+            self.script.path(),
+            self.registry.path(),
+            self.warmup.path(),
+        )
+        .await
+        .unwrap();
 
         let config = LoadTestConfig {
-            profile,
-            script,
-            registry,
-            warmup,
+            profile: inputs.profile.parse::<LoadProfileConfig>().unwrap(),
+            script: inputs.script.parse::<Arc<str>>().unwrap(),
+            registry: inputs.registry.parse::<ServiceRegistryConfig>().unwrap(),
+            warmup: inputs.warmup.parse::<WarmupConfig>().unwrap(),
+            inputs,
             generators: self.generators,
             output_dir: self.output_dir.path().to_path_buf(),
             virtual_user_count: self.virtual_user_count,

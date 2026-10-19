@@ -107,7 +107,7 @@ pub(crate) mod tests {
                 .expect("should receive response")
                 .expect("decode ok");
 
-            assert_matches!(response, ConfigResponse::Ready);
+            assert_matches!(response, ConfigResponse::Ready(_));
         });
 
         let _ = run_with_stream(client)

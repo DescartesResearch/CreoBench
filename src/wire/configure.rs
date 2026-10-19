@@ -23,9 +23,35 @@ pub enum ConfigMessage {
     Abort,
 }
 
+/// Details about a load generator instance, reported once it is ready.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GeneratorInfo {
+    /// The CreoBench version of the load generator.
+    pub version: String,
+    pub os: String,
+    pub arch: String,
+    /// The number of cores the load generator may run on.
+    pub cores: u32,
+    /// The number of async worker threads executing requests.
+    pub worker_threads: u32,
+}
+
+impl GeneratorInfo {
+    #[cfg(test)]
+    pub(crate) fn test_info() -> Self {
+        Self {
+            version: "0.0.0".into(),
+            os: "linux".into(),
+            arch: "x86_64".into(),
+            cores: 8,
+            worker_threads: 7,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ConfigResponse {
-    Ready,
+    Ready(GeneratorInfo),
     SetupFailed { reason: String },
     Aborted,
 }
@@ -106,7 +132,10 @@ mod tests {
     proptest_strategy! {
         config_response_strategy: ConfigResponse => {
             prop_oneof![
-                Just(ConfigResponse::Ready),
+                (any::<String>(), any::<String>(), any::<String>(), any::<u32>(), any::<u32>())
+                    .prop_map(|(version, os, arch, cores, worker_threads)| {
+                        ConfigResponse::Ready(GeneratorInfo { version, os, arch, cores, worker_threads })
+                    }),
                 any::<String>().prop_map(|reason| {
                     ConfigResponse::SetupFailed { reason }
                 }),

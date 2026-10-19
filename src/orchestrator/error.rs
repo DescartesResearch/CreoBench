@@ -70,6 +70,11 @@ pub enum OutputError {
         "output directory `{0}` is not empty: pass the `--overwrite-outputs` if you wish to ignore non-empty output directories"
     )]
     NotEmpty(PathBuf),
+    #[error("failed to write output file `{path}`: {source}")]
+    WriteFile {
+        path: PathBuf,
+        source: std::io::Error,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

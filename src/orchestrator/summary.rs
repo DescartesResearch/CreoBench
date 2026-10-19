@@ -2,15 +2,24 @@ use crate::orchestrator::persist::{Phase, PhaseClassifier};
 use crate::tracker::IntervalReport;
 use crate::transaction::{DroppedCode, TransactionResult};
 
-/// Counts of dropped transactions by reason.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-struct DropCounts {
-    no_virtual_user: u64,
-    late: u64,
-    error: u64,
+/// Transactions of a phase and how many of them were dropped, by reason.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct PhaseDrops {
+    pub transactions: u64,
+    pub no_virtual_user: u64,
+    pub late: u64,
+    pub error: u64,
 }
 
-impl DropCounts {
+/// The dropped transactions of a run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct DropReport {
+    pub load: PhaseDrops,
+    /// Warmup and pause.
+    pub warmup: PhaseDrops,
+}
+
+impl PhaseDrops {
     fn total(&self) -> u64 {
         self.no_virtual_user + self.late + self.error
     }
@@ -65,36 +74,45 @@ impl DropCounts {
 /// scheduled load, so any drop in the load phase invalidates the run.
 pub struct DropSummary {
     classifier: PhaseClassifier,
-    load_transactions: u64,
-    warmup_transactions: u64,
-    load: DropCounts,
-    warmup: DropCounts,
+    load: PhaseDrops,
+    warmup: PhaseDrops,
 }
 
 impl DropSummary {
     pub fn new(warmup_duration: u32, warmup_pause: u32) -> Self {
         Self {
             classifier: PhaseClassifier::new(warmup_duration, warmup_pause),
-            load_transactions: 0,
-            warmup_transactions: 0,
-            load: DropCounts::default(),
-            warmup: DropCounts::default(),
+            load: PhaseDrops::default(),
+            warmup: PhaseDrops::default(),
         }
     }
 
     /// Records the next interval report, in the order the reports arrive.
     pub fn record(&mut self, report: &IntervalReport) {
         let results = report.stats.results();
-        let (transactions, counts) = match self.classifier.classify() {
-            Phase::Load => (&mut self.load_transactions, &mut self.load),
-            Phase::Warmup | Phase::Pause => (&mut self.warmup_transactions, &mut self.warmup),
+        let counts = match self.classifier.classify() {
+            Phase::Load => &mut self.load,
+            Phase::Warmup | Phase::Pause => &mut self.warmup,
         };
-        *transactions += results.len() as u64;
+        counts.transactions += results.len() as u64;
         for result in results {
             if let TransactionResult::Dropped { code, .. } = result {
                 counts.record(code);
             }
         }
+    }
+
+    /// Whether no load-phase transaction was dropped.
+    pub fn is_valid(&self) -> bool {
+        self.load.total() == 0
+    }
+
+    /// The dropped transactions, or `None` if no transaction was dropped.
+    pub fn report(&self) -> Option<DropReport> {
+        (self.load.total() + self.warmup.total() > 0).then_some(DropReport {
+            load: self.load,
+            warmup: self.warmup,
+        })
     }
 
     /// Logs the summary, warning about every dropped transaction.
@@ -104,7 +122,7 @@ impl DropSummary {
                 "The run is invalid: {} of {} load-phase transactions were dropped ({}), so the \
                  load generators did not deliver the scheduled load. To fix this, {}.",
                 self.load.total(),
-                self.load_transactions,
+                self.load.transactions,
                 self.load.breakdown(),
                 self.load.hints(),
             );
@@ -114,7 +132,7 @@ impl DropSummary {
                 "Dropped {} of {} warmup transactions ({}), so the warmup may not have prepared \
                  the system under test as intended. To fix this, {}.",
                 self.warmup.total(),
-                self.warmup_transactions,
+                self.warmup.transactions,
                 self.warmup.breakdown(),
                 self.warmup.hints(),
             );

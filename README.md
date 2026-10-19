@@ -255,8 +255,8 @@ Use `--help` on either binary for the full list of options.
 
 ## Outputs
 
-By default, CreoBench writes two CSV files to `./results`. Use the
-`--output` option to specify a different output directory.
+By default, CreoBench writes two CSV files to `./results`, together with copies of the input files and a `run.json` with
+the run's metadata (see [Outputs](docs/outputs.md)). Use the `--output` option to specify a different output directory.
 
 ### `interval.csv`
 

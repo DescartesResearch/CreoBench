@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::start::StartHandle;
 
 use crate::net::MessageFramer;
-use crate::wire::configure::{ConfigMessage, ConfigResponse};
+use crate::wire::configure::{ConfigMessage, ConfigResponse, GeneratorInfo};
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -55,10 +55,12 @@ where
         &self.addr
     }
 
+    /// Configures the load generator and returns a handle to start it, along
+    /// with the details it reported.
     pub async fn configure(
         mut self,
         config: &ConfigMessage,
-    ) -> Result<StartHandle<S>, ConfigureError> {
+    ) -> Result<(StartHandle<S>, GeneratorInfo), ConfigureError> {
         self.framed
             .send(config.clone())
             .await
@@ -69,7 +71,9 @@ where
 
         match self.framed.next().await {
             Some(Ok(response)) => match response {
-                ConfigResponse::Ready => Ok(StartHandle::new(self.addr, self.framed.into_inner())),
+                ConfigResponse::Ready(info) => {
+                    Ok((StartHandle::new(self.addr, self.framed.into_inner()), info))
+                }
                 ConfigResponse::SetupFailed { reason } => Err(ConfigureError::SetupFailed(reason)),
                 ConfigResponse::Aborted => Err(ConfigureError::Aborted { address: self.addr }),
             },
@@ -157,18 +161,19 @@ mod tests {
                 assert_eq!(config, decoded_config);
 
                 framed
-                    .send(ConfigResponse::Ready)
+                    .send(ConfigResponse::Ready(GeneratorInfo::test_info()))
                     .await
                     .expect("should send response");
             });
         }
 
         let c = ConfigureHandle::new("10.0.0.1:8080".to_string().into(), client);
-        let configured = c
+        let (configured, info) = c
             .configure(&config)
             .await
             .expect("configure should succeed");
         assert_eq!(configured.addr(), "10.0.0.1:8080");
+        assert_eq!(info, GeneratorInfo::test_info());
     }
 
     #[tokio::test]
@@ -211,7 +216,7 @@ mod tests {
             assert_eq!(decoded, ConfigMessage::Abort);
 
             framed
-                .send(ConfigResponse::Ready)
+                .send(ConfigResponse::Ready(GeneratorInfo::test_info()))
                 .await
                 .expect("should send response");
         });
@@ -221,7 +226,7 @@ mod tests {
         assert_matches!(
             err,
             ConfigureError::UnexpectedResponse {
-                response: ConfigResponse::Ready,
+                response: ConfigResponse::Ready(_),
                 ..
             }
         );

@@ -80,7 +80,7 @@ mod tests {
             .expect("should receive response")
             .expect("decode ok");
 
-        assert_matches!(response, ConfigResponse::Ready);
+        assert_matches!(response, ConfigResponse::Ready(_));
 
         framed.into_inner();
     }

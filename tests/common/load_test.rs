@@ -29,6 +29,11 @@ pub struct LoadTestConfig {
     pub warmup_pause: u32,
     /// The number of intervals in the load test.
     pub interval_count: usize,
+    /// The seed of the load test.
+    pub seed: u64,
+    /// The contents of the input files, by the names of their copies in the
+    /// output directory.
+    pub inputs: Vec<(&'static str, String)>,
 
     _server: HttpTestServer,
 }
@@ -72,6 +77,8 @@ impl LoadTestConfig {
             warmup_rate: warmup.rate(),
             warmup_pause: warmup.pause(),
             interval_count: steps.len(),
+            seed: 0,
+            inputs: Vec::new(),
         }
     }
 }
@@ -167,7 +174,7 @@ impl LoadTestBuilder {
         for _ in 0..count {
             generators.push(GeneratorInstance::spawn().await);
         }
-        let config = LoadTestConfig::new(
+        let mut config = LoadTestConfig::new(
             user_specs,
             profile.steps(),
             server,
@@ -175,12 +182,26 @@ impl LoadTestBuilder {
             count,
             virtual_user_count,
         );
+        config.seed = seed;
+        config.inputs = vec![
+            ("profile.csv", profile.to_csv()),
+            ("script.lua", script.build().to_string()),
+            ("registry.yaml", registry.to_yaml()),
+            ("warmup.yaml", warmup.to_yaml()),
+        ];
+        let input = |name| &config.inputs.iter().find(|(n, _)| *n == name).unwrap().1;
+        let (script, profile, warmup, registry) = (
+            write_to_file(input("script.lua")),
+            write_to_file(input("profile.csv")),
+            write_to_file(input("warmup.yaml")),
+            write_to_file(input("registry.yaml")),
+        );
 
         LoadTest {
-            script: write_to_file(&script.build()),
-            profile: write_to_file(&profile.to_csv()),
-            warmup: write_to_file(&warmup.to_yaml()),
-            registry: write_to_file(&registry.to_yaml()),
+            script,
+            profile,
+            warmup,
+            registry,
             generators,
             virtual_user_count,
             seed,
