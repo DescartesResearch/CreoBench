@@ -13,6 +13,12 @@ use creo_bench::test_utils::prelude::*;
 pub struct LoadTestConfig {
     /// The total number of requests the load test dispatches.
     pub total_requests: u32,
+    /// The target request count of each load step, across all generators.
+    pub step_counts: Vec<u32>,
+    /// The number of load generator instances.
+    pub generator_count: u8,
+    /// The number of virtual users per load generator.
+    pub virtual_user_count: u32,
     /// The user specs in spec-id order.
     pub user_specs: Vec<Spec>,
     /// The warmup duration of the load test.
@@ -51,10 +57,15 @@ impl LoadTestConfig {
         steps: &[LoadStepConfig],
         server: HttpTestServer,
         warmup: &WarmupBuilder,
+        generator_count: u8,
+        virtual_user_count: u32,
     ) -> Self {
-        let total_requests = steps.iter().map(|step| step.count).sum();
+        let step_counts: Vec<u32> = steps.iter().map(|step| step.count).collect();
         Self {
-            total_requests,
+            total_requests: step_counts.iter().sum(),
+            step_counts,
+            generator_count,
+            virtual_user_count,
             user_specs,
             _server: server,
             warmup_duration: warmup.duration(),
@@ -156,7 +167,14 @@ impl LoadTestBuilder {
         for _ in 0..count {
             generators.push(GeneratorInstance::spawn().await);
         }
-        let config = LoadTestConfig::new(user_specs, profile.steps(), server, &warmup);
+        let config = LoadTestConfig::new(
+            user_specs,
+            profile.steps(),
+            server,
+            &warmup,
+            count,
+            virtual_user_count,
+        );
 
         LoadTest {
             script: write_to_file(&script.build()),

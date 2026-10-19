@@ -13,95 +13,136 @@ async fn runs_multiple_generators() {
     run_load_test(4).await
 }
 
+/// Virtual users per generator. More than one, so that requests of different
+/// virtual users interleave.
+const VIRTUAL_USERS: u32 = 4;
+
 async fn run_load_test(count: u8) {
     let (orchestrator, generators, config) = load_test(count).await.start();
 
     let output = orchestrator.start().await.expect_ok();
+    let intervals = output.interval_rows();
+    let transactions = output.transaction_rows();
 
-    assert_intervals(&output, &config, count);
-
-    assert_transactions(&output, count);
+    assert_interval_structure(&intervals, &config);
+    assert_results_are_conserved(&intervals, &transactions);
+    assert_transactions_succeed(&transactions);
+    assert_transactions_start_within_their_step(&transactions);
+    assert_every_generator_and_virtual_user_participates(&transactions, &config);
+    assert_virtual_users_alternate_requests(&transactions);
+    assert_arrival_count_matches_rate(&transactions, &config);
 
     for generator in generators {
         generator.join().await.unwrap();
     }
 }
 
-fn assert_intervals(output: &OutputDir, config: &LoadTestConfig, count: u8) {
-    let intervals = output.interval_rows();
-
-    for (phase, expected) in [
-        ("warmup", config.warmup_duration),
-        ("pause", config.warmup_pause),
-        ("load", config.interval_count as u32),
-    ] {
-        let actual = intervals.iter().filter(|row| row.phase == phase).count() as u32;
-        assert_eq!(
-            actual, expected,
-            "phase={phase}, expected={expected}, actual={actual}"
-        );
-    }
-    for (phase, expected) in [
-        (
-            "warmup",
-            config.warmup_duration * config.warmup_rate * count as u32,
-        ),
-        ("pause", 0),
-        ("load", config.total_requests),
-    ] {
-        let actual = intervals
-            .iter()
-            .filter(|row| row.phase == phase)
-            .map(|row| row.load_level)
-            .sum::<u32>();
-        assert_eq!(
-            actual, expected,
-            "phase={phase}, expected={expected}, actual={actual}"
-        );
-    }
-    let paused = intervals
-        .iter()
-        .filter(|row| row.phase == "pause")
-        .map(|row| row.successful_transactions)
-        .sum::<u64>();
-    assert_eq!(paused, 0);
+fn rows_of<'a>(intervals: &'a [IntervalRow], phase: &str) -> Vec<&'a IntervalRow> {
+    intervals.iter().filter(|row| row.phase == phase).collect()
 }
 
-fn assert_transactions(output: &OutputDir, count: u8) {
-    let transactions = output.transaction_rows();
-    // Arrivals are Poisson-distributed, so only the target load level is exact,
-    // not the number of transactions.
+/// Every phase reports one interval per second with the configured load level.
+fn assert_interval_structure(intervals: &[IntervalRow], config: &LoadTestConfig) {
+    let warmup_level = config.warmup_rate * u32::from(config.generator_count);
+    let warmup = rows_of(intervals, "warmup");
+    assert_eq!(warmup.len() as u32, config.warmup_duration);
+    for (second, row) in (1..).zip(&warmup) {
+        assert_eq!(row.target_time, f64::from(second));
+        assert_eq!(row.load_level, warmup_level);
+    }
+
+    let pause = rows_of(intervals, "pause");
+    assert_eq!(pause.len() as u32, config.warmup_pause);
+    for (second, row) in (1..).zip(&pause) {
+        assert_eq!(row.target_time, f64::from(second));
+        assert_eq!(row.load_level, 0);
+        assert_eq!(row.final_batch_time, None);
+    }
+
+    // Load steps may be followed by drain intervals while transactions complete.
+    let load = rows_of(intervals, "load");
+    assert!(load.len() >= config.step_counts.len());
+    for (second, row) in (1..).zip(&load) {
+        assert_eq!(row.target_time, f64::from(second));
+    }
+    let load_levels: Vec<_> = load.iter().map(|row| row.load_level).collect();
+    let (steps, drain) = load_levels.split_at(config.step_counts.len());
+    assert_eq!(steps, config.step_counts);
+    assert!(
+        drain.iter().all(|&level| level == 0),
+        "drain levels {drain:?}"
+    );
+}
+
+/// Every transaction is counted in exactly one interval.
+fn assert_results_are_conserved(intervals: &[IntervalRow], transactions: &[TransactionRow]) {
+    let counted: u64 = intervals
+        .iter()
+        .map(|row| {
+            row.successful_transactions
+                + row.failed_transactions
+                + row.timeout_transactions
+                + row.dropped_transactions
+        })
+        .sum();
+    assert_eq!(counted, transactions.len() as u64);
+}
+
+fn assert_transactions_succeed(transactions: &[TransactionRow]) {
     assert!(!transactions.is_empty());
-    let successful = output
-        .interval_rows()
+    for row in transactions {
+        assert_eq!(row.outcome, "success", "{row:?}");
+        assert!(row.response_time_ms.is_some(), "{row:?}");
+    }
+}
+
+/// All steps last one second, so every transaction starts within the second
+/// before its target time.
+fn assert_transactions_start_within_their_step(transactions: &[TransactionRow]) {
+    for row in transactions {
+        assert!(
+            row.target_time - 1.0 <= row.start_time && row.start_time < row.target_time,
+            "{row:?}"
+        );
+    }
+}
+
+fn assert_every_generator_and_virtual_user_participates(
+    transactions: &[TransactionRow],
+    config: &LoadTestConfig,
+) {
+    let participants: std::collections::BTreeSet<_> = transactions
         .iter()
-        .map(|row| row.successful_transactions)
-        .sum::<u64>();
-    assert_eq!(successful, transactions.len() as u64);
-    assert!(transactions.iter().all(|row| row.outcome == "success"));
+        .map(|row| (row.load_generator_id, row.virtual_user_id))
+        .collect();
+    let expected: std::collections::BTreeSet<_> = (0..config.generator_count)
+        .flat_map(|generator| (0..config.virtual_user_count).map(move |user| (generator, user)))
+        .collect();
+    assert_eq!(participants, expected);
+}
+
+/// Each virtual user executes its behavior loop in order, so its requests
+/// alternate between both specs.
+fn assert_virtual_users_alternate_requests(transactions: &[TransactionRow]) {
+    let mut last_spec = std::collections::HashMap::new();
+    for row in transactions {
+        let spec = row.spec_id.unwrap();
+        if let Some(previous) = last_spec.insert((row.load_generator_id, row.virtual_user_id), spec)
+        {
+            assert_ne!(previous, spec, "{row:?}");
+        }
+    }
+}
+
+/// Arrivals are Poisson-distributed, so the number of transactions is random.
+/// It must lie within five standard deviations of its expected value.
+fn assert_arrival_count_matches_rate(transactions: &[TransactionRow], config: &LoadTestConfig) {
+    let warmup = config.warmup_duration * config.warmup_rate * u32::from(config.generator_count);
+    let expected = f64::from(warmup + config.total_requests);
+    let actual = transactions.len() as f64;
     assert!(
-        transactions
-            .iter()
-            .all(|row| row.target_time > row.start_time)
-    );
-    assert!(
-        transactions
-            .iter()
-            .all(|row| row.response_time_ms.is_some())
-    );
-    // Each generator has a single virtual user that alternates between both
-    // requests, so their counts differ by at most one per generator.
-    let gets = transactions
-        .iter()
-        .filter(|row| row.spec_id.unwrap() == 0)
-        .count();
-    let posts = transactions
-        .iter()
-        .filter(|row| row.spec_id.unwrap() == 1)
-        .count();
-    assert!(
-        gets.abs_diff(posts) <= count as usize,
-        "gets={gets}, posts={posts}"
+        (actual - expected).abs() < 5.0 * expected.sqrt(),
+        "expected about {expected} transactions, got {actual}"
     );
 }
 
@@ -117,8 +158,8 @@ async fn load_test(count: u8) -> LoadTest {
             .with_body(serde_json::json!({"key": "value"})),
     ];
     let profile = ProfileBuilder::new()
-        .add_step(1.0, count as u32 * 4)
-        .add_step(2.0, count as u32 * 6);
+        .add_step(1.0, count as u32 * 200)
+        .add_step(2.0, count as u32 * 300);
     let specs = requests
         .iter()
         .enumerate()
@@ -141,11 +182,20 @@ async fn load_test(count: u8) -> LoadTest {
     );
     let warmup = WarmupBuilder::default()
         .with_duration(2)
-        .with_rate(2)
+        .with_rate(50)
         .with_pause(1);
     let registry = RegistryBuilder::default().with_service(SERVICE, builder.url());
 
     builder
-        .build(script, profile, warmup, registry, count, 1, 5678, specs)
+        .build(
+            script,
+            profile,
+            warmup,
+            registry,
+            count,
+            VIRTUAL_USERS,
+            5678,
+            specs,
+        )
         .await
 }
