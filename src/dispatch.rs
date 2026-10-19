@@ -6,7 +6,7 @@ use crate::load::{
 };
 use crate::math::rng::RangeRNG;
 use crate::tracker::Tracker;
-use crate::transaction::{Batch, LoadGeneratorId, Transaction};
+use crate::transaction::{LoadGeneratorId, Transaction};
 use crate::virtual_user;
 
 /// Signals that all arrivals of a step have been dispatched.
@@ -48,17 +48,6 @@ where
 
     pub fn loadgenerator_id(&self) -> LoadGeneratorId {
         self.loadgenerator_id
-    }
-
-    pub fn dispatch_batch(
-        &self,
-        batch: Batch,
-        target_time: RelativeLoadTestTime,
-        time_zero: LoadTestTime,
-    ) {
-        for _ in 0..batch.size() {
-            self.dispatch(StartTime::now(time_zero), target_time);
-        }
     }
 
     /// Dispatches a single transaction that starts at `start_time`.
@@ -209,25 +198,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_batch_dispatches_all_transactions() {
-        let (dispatcher, tracker) = dispatcher_from(1, 8).await;
-        let batch = Batch::new(5);
-        let target_time = RelativeLoadTestTime::new(Duration::from_secs(1));
-        let time_zero = LoadTestTime::now();
-
-        dispatcher.dispatch_batch(batch, target_time, time_zero);
-        wait(&tracker).await;
-    }
-
-    #[tokio::test]
-    async fn dispatch_batch_propagates_loadgenerator_id_and_target_time() {
+    async fn dispatch_propagates_loadgenerator_id_and_target_time() {
         let loadgenerator_id = LoadGeneratorId::new(42);
         let (dispatcher, tracker) = dispatcher_from(42, 4).await;
-        let batch = Batch::new(4);
         let target_time = RelativeLoadTestTime::new(Duration::from_millis(250));
         let time_zero = LoadTestTime::now();
 
-        dispatcher.dispatch_batch(batch, target_time, time_zero);
+        for _ in 0..4 {
+            dispatcher.dispatch(StartTime::now(time_zero), target_time);
+        }
         wait(&tracker).await;
 
         let stats = tracker.interval_statistics();
@@ -237,27 +216,6 @@ mod tests {
             let (id, time) = id_and_target_time_of(result);
             assert_eq!(id, loadgenerator_id);
             assert_eq!(time, target_time);
-        }
-    }
-
-    #[tokio::test]
-    async fn dispatch_batch_logs_results_with_start_time_before_target_time() {
-        let (dispatcher, tracker) = dispatcher_from(2, 4).await;
-        let batch = Batch::new(3);
-        let target_time = RelativeLoadTestTime::new(Duration::from_secs(1));
-        let time_zero = LoadTestTime::now();
-
-        dispatcher.dispatch_batch(batch, target_time, time_zero);
-        wait(&tracker).await;
-
-        let stats = tracker.interval_statistics();
-        assert_eq!(stats.results().len(), 3);
-        for result in stats.results() {
-            let start_time = start_time_of(result);
-            assert!(
-                start_time < target_time,
-                "expected start_time {start_time:?} < target_time {target_time:?}"
-            );
         }
     }
 
@@ -408,13 +366,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dispatch_batch_completes_when_batch_exceeds_pool_size() {
+    async fn dispatch_completes_when_transactions_exceed_pool_size() {
         let (dispatcher, tracker) = dispatcher_from(3, 1).await;
-        let batch = Batch::new(10);
         let target_time = RelativeLoadTestTime::new(Duration::from_secs(1));
         let time_zero = LoadTestTime::now();
 
-        dispatcher.dispatch_batch(batch, target_time, time_zero);
+        for _ in 0..10 {
+            dispatcher.dispatch(StartTime::now(time_zero), target_time);
+        }
         wait(&tracker).await;
     }
 }

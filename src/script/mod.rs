@@ -22,7 +22,6 @@ const SETUP_FN_NAME: &str = "setup";
 const USER_REQUEST_FN_NAME: &str = "requests";
 
 pub use parser::http::HttpMethod;
-pub use parser::parse_static_spec;
 pub use response::Response;
 pub use runner::{Error, ScriptRunner};
 pub use spec::{HTTPStaticRequestSpec, LuaRequestSpec, RequestSpec};

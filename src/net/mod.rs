@@ -34,8 +34,7 @@ pub mod arc_str {
 use std::fmt;
 use std::str::Utf8Error;
 
-pub use framer::{DecoderError, EncoderError, MessageFramer};
-pub use protocol::{HeaderDeError, HeaderSeError};
+pub use framer::MessageFramer;
 
 #[derive(Debug)]
 pub struct SerdeError {

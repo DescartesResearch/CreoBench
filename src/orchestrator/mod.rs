@@ -7,9 +7,8 @@ pub mod phases;
 pub mod runner;
 
 pub use config::LoadTestConfig;
-pub use distribute::{distribute_count, distribute_profile};
+pub use distribute::distribute_profile;
 pub use error::{ConfigError, Error, OutputError, Result};
-pub use phases::ConnectHandle;
 
 use crate::cli::OrchestratorCli;
 

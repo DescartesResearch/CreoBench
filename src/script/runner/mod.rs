@@ -175,11 +175,6 @@ impl ScriptRunner {
         };
         Ok(extract.call((self.store.clone(), response))?)
     }
-
-    /// Access the store.
-    pub fn store(&self) -> &Store {
-        &self.store
-    }
 }
 
 /// A handle returned from [`ScriptRunner::next_user_spec`] that lets the

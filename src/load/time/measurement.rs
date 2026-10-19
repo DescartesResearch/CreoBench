@@ -9,7 +9,8 @@ pub struct StartTime {
 }
 
 impl StartTime {
-    pub fn now(time_zero: LoadTestTime) -> Self {
+    #[cfg(test)]
+    pub(crate) fn now(time_zero: LoadTestTime) -> Self {
         let now = LoadTestTime::now();
         let relative_to_start = now.duration_since(time_zero);
         Self {

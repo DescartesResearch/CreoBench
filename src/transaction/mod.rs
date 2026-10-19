@@ -1,9 +1,7 @@
-mod batch;
 mod id;
 mod metadata;
 mod result;
 
-pub use batch::Batch;
 pub use id::{LoadGeneratorId, SpecId};
 pub use metadata::Metadata;
 pub use result::{DroppedCode, FailedCode, TimeoutCode, TransactionResult};

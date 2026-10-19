@@ -8,7 +8,7 @@ use tokio_util::codec::{self, Framed};
 
 use crate::dispatch::{Dispatcher, StepDone};
 use crate::http::HttpClient;
-use crate::load::{LoadStepStart, LoadTestTime, RelativeLoadTestTime, ScheduledStep};
+use crate::load::{LoadTestTime, RelativeLoadTestTime, ScheduledStep};
 use crate::math::rng::RangeRNG;
 use crate::net::MessageFramer;
 use crate::tracker::{IntervalReport, Tracker};
@@ -110,7 +110,7 @@ where
         let pause_zero = LoadTestTime::now();
         for deadline in (1..=self.state.warmup.pause).map(LoadStepDeadline::from_secs) {
             let target_time = pause_zero + deadline;
-            tokio::time::sleep(target_time - LoadStepStart::now()).await;
+            tokio::time::sleep_until(Instant::from_std(target_time.into())).await;
 
             // Warmup transactions that complete during the pause belong to the pause.
             let report = IntervalReport::new(
@@ -188,7 +188,7 @@ where
             let elapsed = time_zero.elapsed();
             let target_time =
                 time_zero + (LoadStepDeadline::from_secs(1) + elapsed.as_secs_f64().floor());
-            tokio::time::sleep(target_time - LoadStepStart::now()).await;
+            tokio::time::sleep_until(Instant::from_std(target_time.into())).await;
             let report = IntervalReport::new(
                 target_time.duration_since(time_zero),
                 0,

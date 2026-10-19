@@ -45,7 +45,8 @@ struct Inner<T: HttpClient> {
 
 impl<S: UserState, T: HttpClient> VirtualUser<S, T> {
     /// Returns the virtual user ID.
-    pub fn id(&self) -> VirtualUserId {
+    #[cfg(test)]
+    pub(crate) fn id(&self) -> VirtualUserId {
         self.inner.id
     }
 }
