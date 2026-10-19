@@ -31,7 +31,7 @@ impl<W: Write> TransactionCsvPersister<W> {
                     metadata.start_time,
                     metadata.target_time,
                     metadata.loadgenerator_id.get(),
-                    metadata.virtual_user_id,
+                    metadata.virtual_user_id.to_string(),
                     response_time.as_millis(),
                 ),
                 TransactionResult::Failed {
@@ -42,7 +42,7 @@ impl<W: Write> TransactionCsvPersister<W> {
                     metadata.start_time,
                     metadata.target_time,
                     metadata.loadgenerator_id.get(),
-                    metadata.virtual_user_id,
+                    metadata.virtual_user_id.to_string(),
                     response_time.as_millis(),
                 ),
                 TransactionResult::Timeout {
@@ -53,7 +53,7 @@ impl<W: Write> TransactionCsvPersister<W> {
                     metadata.start_time,
                     metadata.target_time,
                     metadata.loadgenerator_id.get(),
-                    metadata.virtual_user_id,
+                    metadata.virtual_user_id.to_string(),
                     response_time.as_millis(),
                 ),
                 TransactionResult::Dropped {
@@ -64,7 +64,10 @@ impl<W: Write> TransactionCsvPersister<W> {
                     metadata.start_time,
                     metadata.target_time,
                     metadata.loadgenerator_id.get(),
-                    metadata.virtual_user_id,
+                    metadata
+                        .virtual_user_id
+                        .map(|id| id.to_string())
+                        .unwrap_or_default(),
                     response_time.as_millis(),
                 ),
             };
@@ -118,7 +121,7 @@ impl<W: Write> TransactionCsvPersister<W> {
             start_time.as_secs_f64().to_string(),
             send_time,
             load_generator_id.to_string(),
-            virtual_user_id.to_string(),
+            virtual_user_id,
             spec_id,
             response_time_ms.to_string(),
             service_time_ms,

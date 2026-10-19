@@ -38,6 +38,11 @@ impl StartTime {
         self.relative_to_start
     }
 
+    /// The instant of this start time.
+    pub fn instant(&self) -> Instant {
+        self.instant.into()
+    }
+
     /// Returns `instant` relative to the start of the load test.
     ///
     /// Instants before this start time are clamped to it.

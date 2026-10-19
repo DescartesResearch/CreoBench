@@ -231,8 +231,7 @@ mod tests {
         let Scenario { pool, .. } = ScenarioBuilder::default()
             .modify_pool(|p| p.with_size(pool_size))
             .modify_client(|c| {
-                c.with_timeout_duration(Duration::from_secs(60))
-                    .with_response_delay(Duration::from_millis(delay.unwrap_or_default()))
+                c.with_response_delay(Duration::from_millis(delay.unwrap_or_default()))
             })
             .build()
             .await;

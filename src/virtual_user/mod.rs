@@ -9,7 +9,7 @@ mod pool;
 mod user;
 
 pub use pool::{Error, Pool};
-pub use user::VirtualUser;
+pub use user::{Loop, VirtualUser};
 
 /// A unique identifier for a virtual user within a load generator process.
 ///

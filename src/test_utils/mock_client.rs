@@ -50,7 +50,6 @@ impl Default for MockResponse {
 struct Inner {
     requests: Vec<RecordedRequest>,
     response: MockResponse,
-    timeout: Duration,
     response_queue: VecDeque<MockResponse>,
     response_delay: Duration,
 }
@@ -90,11 +89,6 @@ impl MockClientBuilder {
 
     pub fn with_failed_error(mut self, msg: impl Into<String>) -> Self {
         self.inner.response = MockResponse::Failed(msg.into());
-        self
-    }
-
-    pub fn with_timeout_duration(mut self, duration: Duration) -> Self {
-        self.inner.timeout = duration;
         self
     }
 
@@ -181,10 +175,6 @@ impl HttpClient for MockHttpClient {
             MockResponse::Failed(msg) => Err(http::RequestError::Failed(msg)),
         }
     }
-
-    fn timeout(&self) -> Duration {
-        self.inner.lock().unwrap().timeout
-    }
 }
 
 impl HttpClient for Arc<MockHttpClient> {
@@ -196,9 +186,5 @@ impl HttpClient for Arc<MockHttpClient> {
         body: Option<&serde_json::Value>,
     ) -> Result<HttpResponse, http::RequestError> {
         MockHttpClient::send(self, url, method, headers, body).await
-    }
-
-    fn timeout(&self) -> Duration {
-        MockHttpClient::timeout(self)
     }
 }

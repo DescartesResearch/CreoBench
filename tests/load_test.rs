@@ -143,7 +143,7 @@ fn assert_every_generator_and_virtual_user_participates(
 ) {
     let participants: std::collections::BTreeSet<_> = transactions
         .iter()
-        .map(|row| (row.load_generator_id, row.virtual_user_id))
+        .filter_map(|row| Some((row.load_generator_id, row.virtual_user_id?)))
         .collect();
     let expected: std::collections::BTreeSet<_> = (0..config.generator_count)
         .flat_map(|generator| (0..config.virtual_user_count).map(move |user| (generator, user)))

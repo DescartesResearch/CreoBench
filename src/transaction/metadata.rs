@@ -11,7 +11,8 @@ pub struct Metadata {
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct DroppedMetadata {
-    pub virtual_user_id: VirtualUserId,
+    /// The virtual user that was assigned the transaction, if any.
+    pub virtual_user_id: Option<VirtualUserId>,
     pub loadgenerator_id: LoadGeneratorId,
     pub start_time: RelativeLoadTestTime,
     pub target_time: RelativeLoadTestTime,

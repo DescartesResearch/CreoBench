@@ -104,7 +104,7 @@ pub fn dropped_result(
     target_ms: u64,
     code: DroppedCode,
 ) -> TransactionResult {
-    transaction_starting_at(start_ms, target_ms).into_dropped(VirtualUserId::new(vu_id), code)
+    transaction_starting_at(start_ms, target_ms).into_dropped(Some(VirtualUserId::new(vu_id)), code)
 }
 
 pub fn stats_with(results: &[TransactionResult]) -> IntervalStatistics {

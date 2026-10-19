@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::http::HttpClient;
@@ -6,8 +8,19 @@ use crate::load::{
 };
 use crate::math::rng::RangeRNG;
 use crate::tracker::Tracker;
-use crate::transaction::{LoadGeneratorId, Transaction};
-use crate::virtual_user;
+use crate::transaction::{DroppedCode, LoadGeneratorId, Transaction};
+use crate::virtual_user::{self, Loop, VirtualUser};
+
+/// How long after its scheduled arrival a request may still be sent.
+///
+/// Requests that cannot be sent within this tolerance are dropped rather than
+/// sent late, so that everything reaching the system under test arrives on
+/// schedule. A drop thus always means the load generator could not keep up:
+/// its virtual user pool is too small or it lacks resources. The tolerance is
+/// well above the operating system's occasional scheduling hiccups of a few
+/// milliseconds, so a correctly configured load generator does not drop, yet
+/// small compared to typical response times of the systems under test.
+const DROP_TOLERANCE: Duration = Duration::from_millis(10);
 
 /// Signals that all arrivals of a step have been dispatched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,8 +70,10 @@ where
         let tracker = self.tracker.clone();
         let transaction = Transaction::new(self.loadgenerator_id, start_time, target_time);
         tokio::spawn(async move {
-            let virtual_user = pool.acquire().await;
-            let result = virtual_user.send_next_request(pool, transaction).await;
+            let result = match acquire_on_time(&pool, transaction.start_time()).await {
+                Ok(virtual_user) => virtual_user.send_next_request(pool, transaction).await,
+                Err(code) => transaction.into_dropped(None, code),
+            };
             tracker.log_result(result);
         });
     }
@@ -118,6 +133,39 @@ where
     }
 }
 
+/// Takes a virtual user to send a transaction starting at `start_time` on schedule.
+///
+/// Fails with [`DroppedCode::Late`] if the load generator only gets to the
+/// transaction after the [`DROP_TOLERANCE`], and with
+/// [`DroppedCode::NoVirtualUser`] if no virtual user becomes free within it.
+async fn acquire_on_time<T, R>(
+    pool: &virtual_user::Pool<T, R>,
+    start_time: StartTime,
+) -> Result<VirtualUser<Loop, T>, DroppedCode>
+where
+    T: HttpClient + Clone + 'static,
+    R: RangeRNG + Send + Sync + 'static,
+{
+    let deadline = start_time.instant() + DROP_TOLERANCE;
+    if Instant::now() > deadline {
+        return Err(DroppedCode::Late);
+    }
+    if let Some(virtual_user) = pool.try_acquire() {
+        return Ok(virtual_user);
+    }
+    // The timer only decides when to stop waiting; whether a virtual user came
+    // in time is decided on exact instants below.
+    let virtual_user =
+        tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), pool.acquire())
+            .await
+            .map_err(|_| DroppedCode::NoVirtualUser)?;
+    if Instant::now() > deadline {
+        pool.release(virtual_user);
+        return Err(DroppedCode::NoVirtualUser);
+    }
+    Ok(virtual_user)
+}
+
 impl<T, R> Clone for Dispatcher<T, R>
 where
     T: HttpClient + Clone + 'static,
@@ -144,8 +192,17 @@ mod tests {
         loadgenerator_id: u8,
         pool_size: u32,
     ) -> (Dispatcher<MockHttpClient, rand::rngs::StdRng>, Tracker) {
+        dispatcher_with_response_delay(loadgenerator_id, pool_size, Duration::ZERO).await
+    }
+
+    async fn dispatcher_with_response_delay(
+        loadgenerator_id: u8,
+        pool_size: u32,
+        response_delay: Duration,
+    ) -> (Dispatcher<MockHttpClient, rand::rngs::StdRng>, Tracker) {
         let Scenario { pool, .. } = ScenarioBuilder::default()
             .modify_pool(|p| p.with_size(pool_size))
+            .modify_client(|c| c.with_response_delay(response_delay))
             .build()
             .await;
         let tracker = Tracker::new();
@@ -241,6 +298,68 @@ mod tests {
         start_times.sort();
         let expected: Vec<_> = offsets.into_iter().map(RelativeLoadTestTime::new).collect();
         assert_eq!(start_times, expected);
+    }
+
+    fn drop_codes(tracker: &Tracker) -> Vec<Option<DroppedCode>> {
+        tracker
+            .interval_statistics()
+            .results()
+            .iter()
+            .map(|result| match result {
+                TransactionResult::Dropped { metadata, code, .. } => {
+                    assert_eq!(metadata.virtual_user_id, None);
+                    Some(code.clone())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dispatch_drops_transactions_without_a_free_virtual_user_in_time() {
+        let (dispatcher, tracker) =
+            dispatcher_with_response_delay(9, 1, Duration::from_millis(100)).await;
+        let time_zero = LoadTestTime::now();
+        let target_time = RelativeLoadTestTime::new(Duration::from_secs(1));
+
+        for _ in 0..2 {
+            dispatcher.dispatch(StartTime::now(time_zero), target_time);
+        }
+        wait(&tracker).await;
+
+        let mut codes = drop_codes(&tracker);
+        codes.sort_by_key(Option::is_some);
+        assert_eq!(codes, vec![None, Some(DroppedCode::NoVirtualUser)]);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dispatch_waits_briefly_for_a_free_virtual_user() {
+        let (dispatcher, tracker) =
+            dispatcher_with_response_delay(10, 1, Duration::from_millis(2)).await;
+        let time_zero = LoadTestTime::now();
+        let target_time = RelativeLoadTestTime::new(Duration::from_secs(1));
+
+        for _ in 0..2 {
+            dispatcher.dispatch(StartTime::now(time_zero), target_time);
+        }
+        wait(&tracker).await;
+
+        assert_eq!(drop_codes(&tracker), vec![None, None]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_drops_transactions_it_gets_to_too_late() {
+        let (dispatcher, tracker) = dispatcher_from(11, 4).await;
+        let time_zero = LoadTestTime::now();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        dispatcher.dispatch(
+            StartTime::scheduled(time_zero, RelativeLoadTestTime::new(Duration::ZERO)),
+            RelativeLoadTestTime::new(Duration::from_secs(1)),
+        );
+        wait(&tracker).await;
+
+        assert_eq!(drop_codes(&tracker), vec![Some(DroppedCode::Late)]);
     }
 
     fn step(index: usize, deadline: Duration, rate: f64) -> ScheduledStep {

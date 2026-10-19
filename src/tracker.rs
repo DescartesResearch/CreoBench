@@ -359,7 +359,7 @@ mod tests {
 
     fn dropped_result(virtual_user_id: u32) -> TransactionResult {
         fresh_transaction().into_dropped(
-            VirtualUserId::new(virtual_user_id),
+            Some(VirtualUserId::new(virtual_user_id)),
             DroppedCode::Error("test dropped reason".into()),
         )
     }

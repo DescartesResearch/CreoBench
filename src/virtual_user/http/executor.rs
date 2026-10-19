@@ -1,7 +1,5 @@
 use url::Url;
 
-use std::time::Duration;
-
 use crate::http::{self, HttpClient, HttpResponse};
 use crate::load::{RequestTiming, ServiceTimeMeasurement};
 use crate::script::{HTTPStaticRequestSpec, Response, ScriptRunner};
@@ -28,11 +26,6 @@ impl<T: HttpClient> HttpExecutor<T> {
             client,
             jar: CookieJar::new(),
         }
-    }
-
-    /// Return the underlying [`HttpClient`]'s timeout.
-    pub fn timeout(&self) -> Duration {
-        self.client.timeout()
     }
 
     /// Execute a HTTP request as defined by the given [`HTTPStaticRequestSpec`].

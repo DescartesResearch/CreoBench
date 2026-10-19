@@ -42,7 +42,7 @@ impl Transaction {
 
     pub fn into_dropped(
         self,
-        virtual_user_id: VirtualUserId,
+        virtual_user_id: Option<VirtualUserId>,
         code: DroppedCode,
     ) -> TransactionResult {
         TransactionResult::Dropped {
@@ -195,7 +195,7 @@ mod tests {
             start_time: actual_start_time,
             target_time: actual_target_time,
         } = metadata;
-        assert_eq!(actual_virtual_user_id, virtual_user_id);
+        assert_eq!(actual_virtual_user_id, Some(virtual_user_id));
         assert_eq!(actual_loadgenerator_id, loadgenerator_id);
         assert_eq!(actual_start_time, start_time.relative_to_start());
         assert_eq!(actual_target_time, target_time);
@@ -303,7 +303,7 @@ mod tests {
         let virtual_user_id = VirtualUserId::new(99);
         let code = DroppedCode::Error("runner error".to_string());
 
-        let result = transaction.into_dropped(virtual_user_id, code.clone());
+        let result = transaction.into_dropped(Some(virtual_user_id), code.clone());
 
         match result {
             TransactionResult::Dropped {
