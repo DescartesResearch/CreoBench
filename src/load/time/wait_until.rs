@@ -70,10 +70,13 @@ mod tests {
     }
 
     /// Checks the scheduling precision of exponentially distributed waits at
-    /// 50,000 requests per second. Depends on the machine, so it is ignored by
-    /// default; run it on the benchmarking machine with `--ignored`.
+    /// 50,000 requests per second. Windows timers are too coarse and unreliable
+    /// for this, so the test only runs on Unix-like systems by default.
     #[test]
-    #[ignore]
+    #[cfg_attr(
+        not(unix),
+        ignore = "high-resolution timing is unreliable on this platform"
+    )]
     fn lag_is_below_50_microseconds_at_high_rates() {
         use rand::SeedableRng;
 
