@@ -1,17 +1,18 @@
 use futures_util::{SinkExt, StreamExt};
 use rand::SeedableRng;
+use rand::rngs::StdRng;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::mpsc;
+use tokio::time::Instant;
 use tokio_util::codec::{self, Framed};
 
-use crate::dispatch::Dispatcher;
+use crate::dispatch::{Dispatcher, StepDone};
 use crate::http::HttpClient;
-use crate::load::{
-    LoadInterval, LoadIntervalPacer, LoadStepDuration, LoadStepStart, LoadTestTime, WaitTime,
-};
-use crate::math::exponential::DefaultExponentialSampler;
+use crate::load::{LoadStepStart, LoadTestTime, RelativeLoadTestTime, ScheduledStep};
 use crate::math::rng::RangeRNG;
 use crate::net::MessageFramer;
 use crate::tracker::{IntervalReport, IntervalStatistics, Tracker};
+use crate::transaction::LoadGeneratorId;
 use crate::wire::command::Command;
 use crate::wire::report::GeneratorUpdate;
 use crate::wire::{LoadProfile, LoadStepDeadline, Warmup};
@@ -32,6 +33,23 @@ pub enum WaitForCommandError {
 pub enum LoadTestError {
     #[error("failed to send message to orchestrator: {0}")]
     SendError(#[from] <Framer as codec::Encoder<GeneratorUpdate>>::Error),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Phase {
+    Warmup = 0,
+    Load = 1,
+}
+
+/// Random number generator for the arrivals of one phase on one load generator.
+///
+/// Every combination of seed, load generator, and phase yields an independent
+/// stream, so the arrivals of all load generators together again form a Poisson
+/// process. [`SeedableRng::seed_from_u64`] scrambles its input, so neighbouring
+/// values give unrelated streams.
+fn arrival_rng(seed: u64, loadgenerator_id: LoadGeneratorId, phase: Phase) -> StdRng {
+    let id = u64::from(loadgenerator_id.get());
+    StdRng::seed_from_u64(seed ^ (id << 32) ^ ((phase as u64) << 48))
 }
 
 #[derive(Debug)]
@@ -84,44 +102,10 @@ where
     }
 
     pub async fn warmup(&mut self) -> Result<(), LoadTestError> {
-        let time_zero = LoadTestTime::now();
-        for deadline in (1..=self.state.warmup.duration).map(LoadStepDeadline::from_secs) {
-            let step_start = LoadStepStart::now();
-            let target_time = (time_zero + deadline).duration_since(time_zero);
-            let duration = LoadStepDuration::until_deadline(step_start, time_zero, deadline);
-            let interval = LoadInterval::new(duration, self.state.warmup.rate);
-            let mut pacer = LoadIntervalPacer::new(
-                interval,
-                DefaultExponentialSampler::new(rand::rngs::StdRng::seed_from_u64(self.state.seed)),
-            );
-
-            while let Some((batch, wait)) = pacer.next(step_start.elapsed()) {
-                self.dispatcher
-                    .dispatch_batch(batch, target_time, time_zero);
-
-                if wait != WaitTime::ZERO {
-                    tokio::time::sleep(wait.as_duration()).await;
-                }
-            }
-            let final_batch_time = time_zero.elapsed();
-            let wait = pacer.remaining(step_start.elapsed());
-            if wait != WaitTime::ZERO {
-                tokio::time::sleep(wait.as_duration()).await;
-            }
-
-            let stats = self.tracker.interval_statistics();
-
-            let report = IntervalReport::new(
-                target_time,
-                self.state.warmup.rate,
-                stats,
-                Some(final_batch_time),
-            );
-
-            self.framed
-                .send(GeneratorUpdate::IntervalReport(report))
-                .await?;
-        }
+        let warmup = self.state.warmup;
+        let steps = ScheduledStep::from_warmup(&warmup);
+        let load_levels = vec![warmup.rate; steps.len()];
+        self.run_phase(steps, load_levels, Phase::Warmup).await?;
 
         let pause_zero = LoadTestTime::now();
         for deadline in (1..=self.state.warmup.pause).map(LoadStepDeadline::from_secs) {
@@ -142,40 +126,54 @@ where
         Ok(())
     }
 
-    pub async fn load_test(&mut self) -> Result<(), LoadTestError> {
+    /// Runs one phase of Poisson arrivals over `steps` and reports each step at its deadline.
+    ///
+    /// Arrivals are dispatched on a blocking thread, see [`Dispatcher::run_schedule`].
+    /// Returns the time zero of the phase.
+    async fn run_phase(
+        &mut self,
+        steps: Vec<ScheduledStep>,
+        load_levels: Vec<u32>,
+        phase: Phase,
+    ) -> Result<LoadTestTime, LoadTestError> {
+        let deadlines: Vec<_> = steps
+            .iter()
+            .map(|step| RelativeLoadTestTime::new(step.deadline))
+            .collect();
+        let rng = arrival_rng(self.state.seed, self.dispatcher.loadgenerator_id(), phase);
+        let (sender, mut steps_done) = mpsc::unbounded_channel();
+        let dispatcher = self.dispatcher.clone();
         let time_zero = LoadTestTime::now();
-        for step in &self.state.profile.steps {
-            let step_start = LoadStepStart::now();
-            let target_time = (time_zero + step.deadline).duration_since(time_zero);
-            let duration = LoadStepDuration::until_deadline(step_start, time_zero, step.deadline);
-            let interval = LoadInterval::new(duration, step.count);
-            let mut pacer = LoadIntervalPacer::new(
-                interval,
-                DefaultExponentialSampler::new(rand::rngs::StdRng::seed_from_u64(self.state.seed)),
+        let pacer = tokio::task::spawn_blocking(move || {
+            dispatcher.run_schedule(steps, rng, time_zero, sender);
+        });
+
+        while let Some(StepDone {
+            index,
+            last_dispatch,
+        }) = steps_done.recv().await
+        {
+            let deadline = deadlines[index];
+            tokio::time::sleep_until(Instant::from_std((time_zero + deadline).into())).await;
+            let report = IntervalReport::new(
+                deadline,
+                load_levels[index],
+                self.tracker.interval_statistics(),
+                last_dispatch,
             );
-
-            while let Some((batch, wait)) = pacer.next(step_start.elapsed()) {
-                self.dispatcher
-                    .dispatch_batch(batch, target_time, time_zero);
-                if wait != WaitTime::ZERO {
-                    tokio::time::sleep(wait.as_duration()).await;
-                }
-            }
-            let final_batch_time = time_zero.elapsed();
-            let wait = pacer.remaining(step_start.elapsed());
-            if wait != WaitTime::ZERO {
-                tokio::time::sleep(wait.as_duration()).await;
-            }
-
-            let stats = self.tracker.interval_statistics();
-
-            let report =
-                IntervalReport::new(target_time, step.count, stats, Some(final_batch_time));
-
             self.framed
                 .send(GeneratorUpdate::IntervalReport(report))
                 .await?;
         }
+
+        pacer.await.expect("pacer should not panic");
+        Ok(time_zero)
+    }
+
+    pub async fn load_test(&mut self) -> Result<(), LoadTestError> {
+        let steps = ScheduledStep::from_profile(&self.state.profile);
+        let load_levels = self.state.profile.steps.iter().map(|s| s.count).collect();
+        let time_zero = self.run_phase(steps, load_levels, Phase::Load).await?;
 
         while self.tracker.inflight_count() > 0 {
             let elapsed = time_zero.elapsed();
@@ -260,6 +258,17 @@ mod tests {
         framed.next().await.unwrap().unwrap()
     }
 
+    #[test]
+    fn arrival_rng_differs_per_load_generator_and_phase() {
+        use rand::RngExt;
+
+        let first = |id, phase| arrival_rng(5, LoadGeneratorId::new(id), phase).random::<u64>();
+
+        assert_eq!(first(0, Phase::Load), first(0, Phase::Load));
+        assert_ne!(first(0, Phase::Load), first(1, Phase::Load));
+        assert_ne!(first(0, Phase::Load), first(0, Phase::Warmup));
+    }
+
     #[tokio::test]
     async fn load_test_sends_one_interval_report_per_profile_step() {
         let (client, server) = tokio::io::duplex(20);
@@ -314,7 +323,7 @@ mod tests {
 
         let profile = LoadProfile { steps: vec![] };
         let warmup = Warmup {
-            rate: 5,
+            rate: 50,
             duration: 3,
             pause: 1,
         };
@@ -335,7 +344,7 @@ mod tests {
                 report.target_time,
                 RelativeLoadTestTime::new(Duration::from_secs(target_time))
             );
-            assert_eq!(report.load_level, 5);
+            assert_eq!(report.load_level, 50);
             assert!(report.final_batch_time.is_some());
         }
 
