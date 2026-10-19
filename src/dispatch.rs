@@ -20,7 +20,14 @@ use crate::virtual_user::{self, Loop, VirtualUser};
 /// well above the operating system's occasional scheduling hiccups of a few
 /// milliseconds, so a correctly configured load generator does not drop, yet
 /// small compared to typical response times of the systems under test.
+#[cfg(not(any(test, feature = "test-utils")))]
 const DROP_TOLERANCE: Duration = Duration::from_millis(10);
+
+/// Tests use a larger tolerance: timers on CI runners, notably macOS and
+/// Windows, can be late by more than 10 ms, so tests that expect no drops
+/// would fail spuriously.
+#[cfg(any(test, feature = "test-utils"))]
+const DROP_TOLERANCE: Duration = Duration::from_millis(100);
 
 /// Signals that all arrivals of a step have been dispatched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -317,8 +324,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn dispatch_drops_transactions_without_a_free_virtual_user_in_time() {
-        let (dispatcher, tracker) =
-            dispatcher_with_response_delay(9, 1, Duration::from_millis(100)).await;
+        let (dispatcher, tracker) = dispatcher_with_response_delay(9, 1, DROP_TOLERANCE * 3).await;
         let time_zero = LoadTestTime::now();
         let target_time = RelativeLoadTestTime::new(Duration::from_secs(1));
 
@@ -351,7 +357,7 @@ mod tests {
     async fn dispatch_drops_transactions_it_gets_to_too_late() {
         let (dispatcher, tracker) = dispatcher_from(11, 4).await;
         let time_zero = LoadTestTime::now();
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::sleep(DROP_TOLERANCE * 2).await;
 
         dispatcher.dispatch(
             StartTime::scheduled(time_zero, RelativeLoadTestTime::new(Duration::ZERO)),
